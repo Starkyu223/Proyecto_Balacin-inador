@@ -1,69 +1,79 @@
 /*
   ============================================================================
-  BALANCIN AUTOBALANCEADO - Control Inteligente 2
-  Motores + Encoders + MPU6050 con diagnostico I2C y modo automatico
-  Placa: ESP32-S3 (Arduino core 3.x)
+  BALANCIN - Control Inteligente 2
+  PID PASO 3: u -> PWM -> motores (lazo interno de angulo, solo P)
+  Placa: ESP32-S3 (Arduino core 3.x)   |   MPU6050 + motores (sin encoders)
   ============================================================================
 
+  Lazo interno de tu pizarra (primer bloque):
+
+      theta_sp (0 grados) --> (+) --> e = theta_sp - theta_med
+                               ^(-)
+      theta_med (MPU6050) -----'
+
+      e --> [ Kp ] --> u --> [ zona muerta / limite ] --> PWM --> puente H --> motores
+                          signo de u = sentido del giro
+      (por ahora solo P; I y D vienen despues)
+
   USO (Monitor Serial a 115200, con "Nueva linea" activado):
-    - Numero 0-255 -> fija la velocidad (PWM) en el modo actual
-    - 'w'          -> ADELANTE      'r' -> REVERSA      's' -> detener
-    - 'm'          -> activa/desactiva MODO AUTOMATICO (angulo -> motores)
-    - 'c'          -> RECALIBRA el MPU6050 (balancin quieto ~2 s)
-    - 'z'          -> FIJA EL CERO en la posicion de equilibrio actual
-  Cada 200 ms imprime pulsos/RPM de cada motor y el angulo.
+    - 'c' -> recalibra el MPU6050 (balancin quieto ~2 s)
+    - 'z' -> fija el cero: la posicion actual pasa a marcar 0 grados
+    - 'k' + numero -> cambia Kp en vivo. Ej: k2.5   (sin reiniciar)
+    - 'm' -> ACTIVA/DESACTIVA el control (arranca DESACTIVADO por seguridad)
+    - 's' -> desactiva el control y detiene los motores
+
+  PRUEBA SEGURA: primero con las RUEDAS EN EL AIRE. Activa con 'm', inclina el
+  balancin y mira que las ruedas giren hacia donde se inclina. Si el balancin
+  pasa de CORTE_GRADOS el control se apaga solo.
+
+  Salida cada 200 ms:  Angulo | Error | Kp | u | PWM | Ts real
+
+  QUE DEBES VER:
+    Angulo +5  ->  Error -5  ->  u = Kp*(-5)  (negativo)
+    Angulo -5  ->  Error +5  ->  u = Kp*(+5)  (positivo)
+    u > 0 -> motores ADELANTE | u < 0 -> motores REVERSA (signo = direccion).
+    Inclinar el balancin hacia adelante debe girar las ruedas hacia adelante.
+    Ts real    ->  cerca de 10 ms (periodo de muestreo fijo)
 
   ============================================================================
   TABLA DE CONTENIDO
   ============================================================================
-  Secciones del archivo (en orden):
-    1. DEPENDENCIAS
-    2. CONFIGURACION        (pines y constantes #define / const)
-    3. VARIABLES GLOBALES   (estado que cambia en ejecucion)
-    4. FUNCIONES PRINCIPALES
-    5. FUNCIONES DE APOYO
+  Secciones: 1. DEPENDENCIAS  2. CONFIGURACION  3. VARIABLES GLOBALES
+             4. FUNCIONES PRINCIPALES  5. FUNCIONES DE APOYO
 
-  --------------------------------------------------------------------------
-  NOMBRAMIENTO DE VARIABLES (convencion)
-  --------------------------------------------------------------------------
-    MAYUSCULAS          constantes y pines          AIN1, PWM_FREQ, ALPHA
-    sufijo _A / _B      pertenece al motor A o B    PULSOS_POR_VUELTA_A
-    prefijo ENC_        pines del encoder           ENC_A_FASEA
-    camelCase           variables globales          velocidadActual
-    sufijo Raw          dato crudo del sensor       axRaw, gyRaw
-    sufijo Offset       correccion de calibracion   gyroOffsetY
-    prefijo angulo...   valores en grados           anguloInclinacion
-    prefijo modo...     banderas de estado          modoActual, modoAutomatico
-    sufijo _ISR         rutinas de interrupcion     encoderA_ISR
+  Nombramiento de variables:
+    MAYUSCULAS        constantes y pines            TS_MS, ANGULO_SP
+    camelCase         variables globales            errorAngulo
+    sufijo Raw        dato crudo del sensor         axRaw
+    sufijo Offset     correccion de calibracion     gyroOffsetY
+    prefijo angulo... valores en grados             anguloCero
 
   Variables globales principales:
-    pulsosA / pulsosB      pulsos acumulados de cada encoder (volatile)
-    modoActual             ADELANTE o REVERSA
-    velocidadActual        PWM actual 0-255
-    anguloInclinacion      angulo filtrado SIN compensar (grados)
-    anguloCero             lo que marca el sensor en equilibrio (grados)
-    mpuOk                  true si el MPU6050 responde
-    modoAutomatico         true si el modo automatico esta activo
+    anguloInclinacion   angulo filtrado sin compensar (grados)
+    anguloCero          lo que marca el sensor en equilibrio (grados)
+    anguloSetpoint      theta_sp, referencia (grados)
+    anguloMedido        theta_med, angulo compensado (grados)
+    errorAngulo         e = theta_sp - theta_med (grados)
+    kp                  ganancia proporcional (ajustable con 'k')
+    salidaU             u = Kp * e (unidades de PWM, aun sin limitar)
+    controlActivo       true si el lazo esta moviendo los motores
+    modoActual          ADELANTE o REVERSA (sentido segun signo de u)
+    velocidadActual     PWM aplicado 0-255
+    tsReal              periodo real medido entre ejecuciones del lazo (ms)
 
-  --------------------------------------------------------------------------
-  FUNCIONES PRINCIPALES (flujo del programa)
-  --------------------------------------------------------------------------
-    setup()                 inicia motores, encoders y MPU6050
-    loop()                  ciclo: comandos -> sensor -> control -> impresion
-    procesarComandos()      lee y ejecuta los comandos del Monitor Serial
-    atenderMPU()            actualiza el angulo y reintenta si se pierde el MPU
-    controlAutomatico()     angulo -> sentido y PWM de los motores
-    imprimirEstado()        calcula RPM e imprime cada INTERVALO_MS
+  Funciones principales:
+    setup(), loop(), procesarComandos(), atenderMPU(),
+    lazoControl()  (a periodo fijo TS_MS: error, u = Kp*e y aplica PWM),
+    imprimirEstado()
 
-  --------------------------------------------------------------------------
-  FUNCIONES DE APOYO
-  --------------------------------------------------------------------------
-    Encoders:   encoderA_ISR(), encoderB_ISR()
-    Motores:    motorA(), motorB(), aplicarMovimiento(), detenerMotores()
-    MPU6050:    mpuEscribir(), mpuLeerCrudo(), escanearI2C(),
-                calibrarGiroscopio(), anguloDesdeAcelerometro(),
-                iniciarMPU(), ponerCeroActual(), actualizarAngulo(),
-                anguloFinal()
+  Funciones de apoyo (motores):
+    motorA(), motorB(), aplicarMovimiento(), detenerMotores(),
+    aplicarSalida()  (u -> sentido + PWM con zona muerta y limite)
+
+  Funciones de apoyo (MPU6050):
+    mpuEscribir(), mpuLeerCrudo(), escanearI2C(), calibrarGiroscopio(),
+    anguloDesdeAcelerometro(), iniciarMPU(), ponerCeroActual(),
+    actualizarAngulo(), anguloFinal()
   ============================================================================
 */
 
@@ -87,16 +97,6 @@
 #define PWM_FREQ       5000
 #define PWM_RESOLUTION 8
 
-// ---------- Pines de los encoders ----------
-#define ENC_A_FASEA 18
-#define ENC_A_FASEB 8
-#define ENC_B_FASEA 38
-#define ENC_B_FASEB 39
-
-// Calibrados a mano (5 vueltas): A = 4455/5, B = 4237/5
-#define PULSOS_POR_VUELTA_A 891
-#define PULSOS_POR_VUELTA_B 847
-
 // ---------- MPU6050 ----------
 #define MPU_ADDR     0x68
 #define SDA_PIN      21
@@ -105,70 +105,83 @@
 #define WHO_AM_I     0x75
 #define ACCEL_XOUT_H 0x3B
 
-// 1 = el balancin se inclina girando sobre el eje Y del sensor (usa ax, az, gy)
-// 0 = el balancin se inclina girando sobre el eje X del sensor (usa ay, az, gx)
+// 1 = el balancin se inclina sobre el eje Y del sensor (usa ax, az, gy)
+// 0 = el balancin se inclina sobre el eje X del sensor (usa ay, az, gx)
 #define INCLINA_SOBRE_EJE_Y 1
 
 // Cambia a true si el signo del angulo sale al reves de lo esperado
 #define INVERTIR_ANGULO false
 
-// Valor inicial del "cero" (equilibrio). Con el comando 'z' lo fijas en cualquier
-// momento; si quieres que quede guardado al reiniciar, copia aqui el valor que imprime 'z'.
+// Cero inicial. Con 'z' lo fijas; para guardarlo al reiniciar, copia aqui
+// el valor que imprime 'z'.
 #define ANGULO_CERO 0.2
 
 const float ACCEL_SENS = 16384.0;
 const float GYRO_SENS  = 131.0;
-const float ALPHA      = 0.98;   // filtro complementario
+const float ALPHA      = 0.98;    // filtro complementario
 
-// ---------- Modo automatico ----------
-const float ZONA_MUERTA_GRADOS = 5.0;  // por debajo de esto, motores detenidos
-const float ANGULO_MAX_GRADOS  = 30.0; // a partir de aqui, velocidad maxima
-const int   VELOCIDAD_MIN      = 60;   // PWM minimo para vencer la friccion
-const int   VELOCIDAD_MAX      = 255;
+// ---------- Lazo de control ----------
+const unsigned long TS_MS = 10;   // periodo de muestreo (Tsample) = 100 Hz
+const float ANGULO_SP = 0.0;      // theta_sp: balancin vertical
+// u esta en unidades de PWM y el error en grados: con Kp = 8, un error de 30
+// grados da u = 240 (casi PWM maximo). Ajustalo en vivo con 'k'.
+const float KP_INICIAL = 1.0;     // ganancia proporcional inicial
+
+// ---------- Salida a motores ----------
+const float ZONA_MUERTA_U = 2.0;  // si |u| es menor, motores detenidos (evita temblor)
+// PWM minimo con el que arranca cada motor (compensacion de zona muerta).
+// Medidos a mano: el motor izquierdo arranca con 10 y el derecho con 19.
+// Se asume Motor A = izquierdo y Motor B = derecho; si es al reves, intercambia los valores.
+// Con el balancin en el suelo (con peso) suelen subir: vuelve a medirlos asi.
+const int   PWM_MIN_B = 10;       // Motor B (izquierdo)
+const int   PWM_MIN_A = 19;       // Motor A (derecho)
+const int   PWM_MAX = 255;
+const float CORTE_GRADOS = 45.0;  // si se inclina mas que esto, se apaga el control
 
 // ---------- Tiempos ----------
-const unsigned long INTERVALO_MS = 200;   // periodo de impresion
+const unsigned long INTERVALO_MS = 200;       // periodo de impresion
 const unsigned long REINTENTO_MPU_MS = 3000;
 
 // ============================================================================
 // 3. VARIABLES GLOBALES
 // ============================================================================
 
-// ---------- Encoders ----------
-volatile long pulsosA = 0;
-volatile long pulsosB = 0;
-unsigned long ultimoCalculo = 0;
+// ---------- MPU6050 ----------
+int16_t axRaw, ayRaw, azRaw, gxRaw, gyRaw, gzRaw;
+float gyroOffsetX = 0, gyroOffsetY = 0;
+float anguloInclinacion = 0;      // grados (sin compensar)
+float anguloCero = ANGULO_CERO;   // lo que marca el sensor en equilibrio
+unsigned long ultimoTiempoMPU = 0;
+bool mpuOk = false;
+unsigned long ultimoReintento = 0;
 
 // ---------- Motores ----------
 enum Modo { ADELANTE, REVERSA };
 Modo modoActual = ADELANTE;
 int velocidadActual = 0;
 
-// ---------- MPU6050 ----------
-int16_t axRaw, ayRaw, azRaw, gxRaw, gyRaw, gzRaw;
-float gyroOffsetX = 0, gyroOffsetY = 0;
-float anguloInclinacion = 0;       // grados (sin compensar)
-float anguloCero = ANGULO_CERO;    // lo que marca el sensor en equilibrio
-unsigned long ultimoTiempoMPU = 0;
-bool mpuOk = false;
-unsigned long ultimoReintento = 0;
+// ---------- Lazo de control ----------
+bool controlActivo = false;       // arranca desactivado por seguridad
+float anguloSetpoint = ANGULO_SP; // theta_sp
+float anguloMedido = 0;           // theta_med
+float errorAngulo = 0;            // e = theta_sp - theta_med
+float kp = KP_INICIAL;            // ganancia proporcional
+float salidaU = 0;                // u = Kp * e
+unsigned long ultimoControl = 0;
+unsigned long tsReal = 0;         // ms reales entre dos ejecuciones del lazo
 
-// ---------- Modo automatico ----------
-bool modoAutomatico = false;
+unsigned long ultimaImpresion = 0;
 
-// ---------- Declaraciones anticipadas (prototipos) ----------
-// Necesarias porque las funciones de apoyo estan al final del archivo y el
-// IDE no genera solos los prototipos de las ISR (IRAM_ATTR).
-void IRAM_ATTR encoderA_ISR();
-void IRAM_ATTR encoderB_ISR();
+// ---------- Prototipos ----------
 void procesarComandos();
 void atenderMPU();
-void controlAutomatico();
-void imprimirEstado();
+void lazoControl();
+void aplicarSalida(float u);
 void motorA(bool dirForward, int pwm);
 void motorB(bool dirForward, int pwm);
 void aplicarMovimiento();
 void detenerMotores();
+void imprimirEstado();
 bool mpuEscribir(uint8_t registro, uint8_t valor);
 bool mpuLeerCrudo();
 void escanearI2C();
@@ -192,19 +205,9 @@ void setup() {
   pinMode(AIN2, OUTPUT);
   pinMode(BIN1, OUTPUT);
   pinMode(BIN2, OUTPUT);
-
   ledcAttach(PWMA, PWM_FREQ, PWM_RESOLUTION);
   ledcAttach(PWMB, PWM_FREQ, PWM_RESOLUTION);
   detenerMotores();
-
-  // ---- Encoders ----
-  pinMode(ENC_A_FASEA, INPUT);
-  pinMode(ENC_A_FASEB, INPUT);
-  pinMode(ENC_B_FASEA, INPUT);
-  pinMode(ENC_B_FASEB, INPUT);
-
-  attachInterrupt(digitalPinToInterrupt(ENC_A_FASEA), encoderA_ISR, RISING);
-  attachInterrupt(digitalPinToInterrupt(ENC_B_FASEA), encoderB_ISR, RISING);
 
   // ---- MPU6050 ----
   Wire.begin(SDA_PIN, SCL_PIN);
@@ -217,19 +220,19 @@ void setup() {
     Serial.print("    SDA -> GPIO "); Serial.println(SDA_PIN);
     Serial.print("    SCL -> GPIO "); Serial.println(SCL_PIN);
     Serial.println("    VCC -> 3V3, GND -> GND, AD0 -> GND");
-    Serial.println("    Los motores siguen funcionando por comandos.");
   }
 
-  ultimoCalculo = millis();
+  ultimoControl = millis();
+  ultimaImpresion = millis();
   ultimoReintento = millis();
 
-  Serial.println("=== Listo: numero 0-255 | w r s | m = automatico | c = recalibrar | z = fijar cero ===");
+  Serial.println("=== PID Paso 1 listo: c = recalibrar | z = fijar cero | k<num> = Kp | m = control ON/OFF | s = stop ===");
 }
 
 void loop() {
   procesarComandos();
   atenderMPU();
-  if (modoAutomatico && mpuOk) controlAutomatico();
+  lazoControl();
   imprimirEstado();
 }
 
@@ -241,20 +244,13 @@ void procesarComandos() {
   entrada.trim();
 
   if (entrada.equalsIgnoreCase("c")) {
-    // Recalibrar el MPU sin desconectar nada (balancin quieto ~2 s)
-    modoAutomatico = false;
+    controlActivo = false;
     detenerMotores();
     Serial.println(">>> Recalibrando MPU6050, mantenlo quieto...");
     mpuOk = iniciarMPU();
-    if (mpuOk) {
-      Serial.println(">>> Recalibracion completa");
-    } else {
-      Serial.println("!!! No se pudo recalibrar: el MPU6050 no responde");
-    }
+    Serial.println(mpuOk ? ">>> Recalibracion completa"
+                         : "!!! No se pudo recalibrar: el MPU6050 no responde");
   } else if (entrada.equalsIgnoreCase("z")) {
-    // Fijar el cero: el balancin debe estar quieto en su punto de equilibrio
-    modoAutomatico = false;
-    detenerMotores();
     if (mpuOk && ponerCeroActual()) {
       Serial.print(">>> CERO fijado. El sensor marcaba ");
       Serial.print(anguloCero, 2);
@@ -268,38 +264,34 @@ void procesarComandos() {
     if (!mpuOk) {
       Serial.println(">>> No se puede: el MPU6050 no responde");
     } else {
-      modoAutomatico = !modoAutomatico;
-      if (!modoAutomatico) detenerMotores();
-      Serial.println(modoAutomatico ? ">>> MODO AUTOMATICO activado" : ">>> Modo automatico desactivado");
+      controlActivo = !controlActivo;
+      if (!controlActivo) detenerMotores();
+      Serial.println(controlActivo ? ">>> CONTROL ACTIVADO" : ">>> Control desactivado");
     }
-  } else {
-    modoAutomatico = false; // cualquier comando manual desactiva el automatico
-    if (entrada.equalsIgnoreCase("w")) {
-      modoActual = ADELANTE;
-      aplicarMovimiento();
-      Serial.println(">>> Modo: ADELANTE");
-    } else if (entrada.equalsIgnoreCase("r")) {
-      modoActual = REVERSA;
-      aplicarMovimiento();
-      Serial.println(">>> Modo: REVERSA");
-    } else if (entrada.equalsIgnoreCase("s")) {
-      detenerMotores();
-      Serial.println(">>> Detenido");
-    } else if (entrada.length() > 0) {
-      velocidadActual = constrain(entrada.toInt(), 0, 255);
-      aplicarMovimiento();
-      Serial.print(">>> PWM: ");
-      Serial.println(velocidadActual);
+  } else if (entrada.equalsIgnoreCase("s")) {
+    controlActivo = false;
+    detenerMotores();
+    Serial.println(">>> Detenido");
+  } else if (entrada.length() > 1 && (entrada[0] == 'k' || entrada[0] == 'K')) {
+    // Cambiar Kp en vivo. Acepta: k2.5  kp2.5  kp=2.5  k 2.5
+    int i = 1;
+    while (i < (int)entrada.length() && !isDigit(entrada[i]) && entrada[i] != '.' && entrada[i] != '-') i++;
+    if (i < (int)entrada.length()) {
+      kp = entrada.substring(i).toFloat();
+      Serial.print(">>> Kp = ");
+      Serial.println(kp, 3);
+    } else {
+      Serial.println("!!! Escribe k seguido de un numero. Ej: k2.5");
     }
   }
 }
 
-// Actualiza el angulo; si se pierde el MPU, detiene motores y reintenta cada 3 s
+// Actualiza el angulo; si se pierde el MPU, reintenta cada 3 s
 void atenderMPU() {
   if (mpuOk) {
     if (!actualizarAngulo()) {
       mpuOk = false;
-      modoAutomatico = false;
+      controlActivo = false;
       detenerMotores();
       Serial.println("!!! Se perdio la comunicacion con el MPU6050");
     }
@@ -310,72 +302,86 @@ void atenderMPU() {
   }
 }
 
-// Modo automatico provisional: angulo -> sentido y PWM proporcional.
-// (Se reemplaza por el controlador PID en el siguiente paso.)
-void controlAutomatico() {
-  float ang = anguloFinal();
-  float mag = fabs(ang);
+// LAZO INTERNO (paso 3): se ejecuta solo cuando pasaron TS_MS (periodo de muestreo fijo)
+//   if (tiempoActual - tiempoUltimo >= Ts) { ... }
+void lazoControl() {
+  unsigned long ahora = millis();
+  if (ahora - ultimoControl < TS_MS) return;
 
-  if (mag < ZONA_MUERTA_GRADOS) {
+  tsReal = ahora - ultimoControl;
+  ultimoControl = ahora;
+
+  if (!mpuOk) return;
+
+  anguloMedido = anguloFinal();                // theta_med (del MPU)
+  errorAngulo  = anguloSetpoint - anguloMedido; // e = theta_sp - theta_med
+
+  salidaU = kp * errorAngulo;                   // u = Kp * e
+
+  // PASO 3: u -> sentido + PWM -> motores
+  if (controlActivo) {
+    if (fabs(anguloMedido) > CORTE_GRADOS) {    // el balancin cayo: apagar
+      controlActivo = false;
+      detenerMotores();
+      Serial.println("!!! Angulo fuera de rango: control desactivado");
+    } else {
+      aplicarSalida(salidaU);
+    }
+  }
+}
+
+// u -> motores. Signo de u = sentido; |u| = magnitud del PWM.
+//   u > 0 -> ADELANTE      u < 0 -> REVERSA
+//   |u| < ZONA_MUERTA_U    -> detenido
+//   si no: PWM de cada motor = su PWM_MIN + |u| reescalado hasta PWM_MAX
+//          (cada motor tiene su propio minimo, asi arrancan a la vez)
+void aplicarSalida(float u) {
+  float mag = fabs(u);
+
+  if (mag < ZONA_MUERTA_U) {
     detenerMotores();
     return;
   }
 
-  // Invertido tras la prueba: inclinar adelante -> ruedas adelante
-  modoActual = (ang > 0) ? REVERSA : ADELANTE;
-  velocidadActual = map((long)(constrain(mag, ZONA_MUERTA_GRADOS, ANGULO_MAX_GRADOS) * 100),
-                        (long)(ZONA_MUERTA_GRADOS * 100), (long)(ANGULO_MAX_GRADOS * 100),
-                        VELOCIDAD_MIN, VELOCIDAD_MAX);
-  aplicarMovimiento();
+  mag = constrain(mag, 0.0f, (float)PWM_MAX);
+  int pwmA = PWM_MIN_A + (int)(mag * (PWM_MAX - PWM_MIN_A) / PWM_MAX);
+  int pwmB = PWM_MIN_B + (int)(mag * (PWM_MAX - PWM_MIN_B) / PWM_MAX);
+  velocidadActual = (pwmA + pwmB) / 2;          // solo para imprimir
+  modoActual = (u > 0) ? ADELANTE : REVERSA;
+
+  bool adelante = (modoActual == REVERSA);      // misma inversion que aplicarMovimiento()
+  motorA(adelante, pwmA);
+  motorB(adelante, pwmB);
 }
 
-// Cada INTERVALO_MS calcula las RPM de cada motor e imprime el estado
 void imprimirEstado() {
   unsigned long ahora = millis();
-  if (ahora - ultimoCalculo < INTERVALO_MS) return;
+  if (ahora - ultimaImpresion < INTERVALO_MS) return;
+  ultimaImpresion = ahora;
 
-  noInterrupts();
-  long copiaA = pulsosA;
-  long copiaB = pulsosB;
-  pulsosA = 0;
-  pulsosB = 0;
-  interrupts();
-
-  float minutos = (ahora - ultimoCalculo) / 60000.0;
-  float rpmA = (copiaA / (float)PULSOS_POR_VUELTA_A) / minutos;
-  float rpmB = (copiaB / (float)PULSOS_POR_VUELTA_B) / minutos;
-
-  Serial.print("Motor A: ");
-  Serial.print(copiaA);
-  Serial.print(" pulsos, ");
-  Serial.print(rpmA, 1);
-  Serial.print(" RPM | Motor B: ");
-  Serial.print(copiaB);
-  Serial.print(" pulsos, ");
-  Serial.print(rpmB, 1);
-  if (mpuOk) {
-    Serial.print(" RPM | Angulo: ");
-    Serial.print(anguloFinal(), 2);
-    Serial.println(modoAutomatico ? " grados [AUTO]" : " grados");
-  } else {
-    Serial.println(" RPM | Angulo: SIN SENSOR (revisa SDA/SCL)");
+  if (!mpuOk) {
+    Serial.println("Angulo: SIN SENSOR (revisa SDA/SCL)");
+    return;
   }
 
-  ultimoCalculo = ahora;
+  Serial.print("Angulo: ");
+  Serial.print(anguloMedido, 2);
+  Serial.print(" | Error: ");
+  Serial.print(errorAngulo, 2);
+  Serial.print(" | Kp: ");
+  Serial.print(kp, 2);
+  Serial.print(" | u: ");
+  Serial.print(salidaU, 2);
+  Serial.print(" | PWM: ");
+  Serial.print(controlActivo ? velocidadActual : 0);
+  Serial.print(" | Ts real: ");
+  Serial.print(tsReal);
+  Serial.println(controlActivo ? " ms [CONTROL]" : " ms");
 }
 
 // ============================================================================
 // 5. FUNCIONES DE APOYO
 // ============================================================================
-
-// ---------- Encoders (interrupciones) ----------
-void IRAM_ATTR encoderA_ISR() {
-  if (digitalRead(ENC_A_FASEB) == HIGH) pulsosA++; else pulsosA--;
-}
-
-void IRAM_ATTR encoderB_ISR() {
-  if (digitalRead(ENC_B_FASEB) == HIGH) pulsosB++; else pulsosB--;
-}
 
 // ---------- Motores ----------
 void motorA(bool dirForward, int pwm) {
@@ -403,6 +409,7 @@ void detenerMotores() {
 }
 
 // ---------- MPU6050 ----------
+
 bool mpuEscribir(uint8_t registro, uint8_t valor) {
   Wire.beginTransmission(MPU_ADDR);
   Wire.write(registro);
@@ -462,7 +469,7 @@ bool calibrarGiroscopio() {
   return true;
 }
 
-// Angulo calculado solo con el acelerometro (usa los ultimos datos crudos leidos)
+// Angulo calculado solo con el acelerometro (usa los ultimos datos crudos)
 float anguloDesdeAcelerometro() {
   float ax = axRaw / ACCEL_SENS;
   float ay = ayRaw / ACCEL_SENS;
@@ -498,8 +505,7 @@ bool iniciarMPU() {
   return true;
 }
 
-// Fija la posicion actual como "angulo 0" (equilibrio). Promedia 100 lecturas
-// del acelerometro (~0.4 s) para no depender de una sola muestra con ruido.
+// Fija la posicion actual como "angulo 0". Promedia 100 lecturas (~0.4 s).
 bool ponerCeroActual() {
   float suma = 0;
   const int muestras = 100;
