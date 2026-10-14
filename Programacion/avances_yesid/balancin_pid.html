@@ -1,0 +1,1603 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Balancín · Monitor PID</title>
+<script>try{if(localStorage.getItem('balancin_theme')==='light')document.documentElement.dataset.theme='light'}catch(e){}</script>
+<style>
+:root{
+  --bg:#09090a; --panel:#121214; --panel2:#18181b; --line:#26262b; --line2:#34343a;
+  --text:#ececee; --muted:#8c8c95; --orange:#ff7a00; --orange2:#ffa040; --orange-dim:rgba(255,122,0,.14);
+  --red:#ff4d4d; --green:#3ddc84; --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --topbg:#0c0c0e; --input:#0c0c0e; --tagbg:#1d1d21; --kbd:#202024; --text2:#c9c9cf; --scroll:#2c2c32;
+  --hero:linear-gradient(160deg,#1f1409,#18181b); --heroline:#5a3a12; --focusbg:#1b130a;
+  --kpline:#5a3a12; --kicol:#9fd6ff; --kiline:#264a63;
+  --dangerline:#7a2a2a; --dangertxt:#ff9b9b; --estopbg:#2a0d0d;
+  --vizbg:radial-gradient(ellipse at 50% 30%,#17171b 0%,#0c0c0e 70%);
+  --gnd:#141417; --gndline:#34343a; --gndtop:#3a3a40; --vref:#5b5b63;
+  --logbg:#060607; --toast:#1d1d21; --bannerbg:#2a1d00; --bannerline:#6b4a00; --bannertxt:#ffd08a;
+  --shadow:0 6px 24px rgba(0,0,0,.5);
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#f3f1ed; --panel:#ffffff; --panel2:#f7f5f1; --line:#e4e0d8; --line2:#cfc9bd;
+  --text:#1b1b1f; --muted:#6a6a73; --orange:#f06a00; --orange2:#c25500; --orange-dim:rgba(240,106,0,.14);
+  --red:#e03131; --green:#1f9d5a;
+  --topbg:#ffffff; --input:#ffffff; --tagbg:#f1eee8; --kbd:#ece8e0; --text2:#33333a; --scroll:#cfc9bd;
+  --hero:linear-gradient(160deg,#fff1e2,#ffffff); --heroline:#f3c79a; --focusbg:#fff4e8;
+  --kpline:#f3c79a; --kicol:#0b6fa4; --kiline:#a9d3ea;
+  --dangerline:#e8a9a9; --dangertxt:#c02626; --estopbg:#fff0f0;
+  --vizbg:radial-gradient(ellipse at 50% 30%,#ffffff 0%,#ece8e0 75%);
+  --gnd:#e2ded5; --gndline:#b9b3a6; --gndtop:#9d978a; --vref:#9a9aa3;
+  --logbg:#fbfaf8; --toast:#ffffff; --bannerbg:#fff4d6; --bannerline:#e5c46a; --bannertxt:#6b4a00;
+  --shadow:0 6px 24px rgba(60,40,10,.18);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,"Segoe UI",Roboto,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:6px}::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- barra superior ---------- */
+.top{display:flex;align-items:center;gap:18px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--topbg);position:sticky;top:0;z-index:20;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.04em}
+.brand b{color:var(--orange)}
+.brand svg{width:26px;height:26px}
+.tabs{display:flex;gap:4px}
+.tab-btn{background:none;border:0;border-bottom:2px solid transparent;padding:8px 14px;color:var(--muted);font-weight:600}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.on{color:var(--orange);border-bottom-color:var(--orange)}
+.spacer{flex:1}
+.conn{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dot{width:10px;height:10px;border-radius:50%;background:#55555c;box-shadow:0 0 0 3px rgba(255,255,255,.04)}
+.dot.on{background:var(--green);box-shadow:0 0 10px var(--green)}
+.dot.sim{background:var(--orange);box-shadow:0 0 10px var(--orange)}
+.dot.warn{background:#ffd400}
+#connLabel{color:var(--muted);font-size:13px}
+
+/* ---------- controles base ---------- */
+.btn{background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:7px 13px;font-weight:600;transition:.12s}
+.btn:hover{border-color:var(--orange);color:var(--orange2)}
+.btn:disabled{opacity:.4;pointer-events:none}
+.btn.pri{background:var(--orange);border-color:var(--orange);color:#111}
+.btn.pri:hover{background:var(--orange2);color:#111}
+.btn.danger{border-color:var(--dangerline);color:var(--dangertxt)}
+.btn.danger:hover{background:var(--red);border-color:var(--red);color:#fff}
+.btn.sm{padding:4px 9px;font-size:12px}
+select,input[type=number],input[type=text],textarea{background:var(--input);border:1px solid var(--line2);border-radius:7px;padding:6px 9px;outline:none}
+select:focus,input:focus,textarea:focus{border-color:var(--orange)}
+input[type=checkbox]{accent-color:var(--orange)}
+input[type=range]{accent-color:var(--orange);width:100%}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.card h3{margin:0 0 10px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700;display:flex;align-items:center;gap:8px}
+.card h3::before{content:"";width:3px;height:12px;background:var(--orange);border-radius:2px}
+.row{display:flex;align-items:center;gap:8px}
+.row.sp{justify-content:space-between}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono)}
+
+#banner{display:none;margin:14px 16px 0;padding:10px 14px;border:1px solid var(--bannerline);background:var(--bannerbg);color:var(--bannertxt);border-radius:10px}
+
+.tab{display:none}.tab.on{display:block}
+
+/* ---------- en vivo ---------- */
+.live{display:grid;grid-template-columns:320px 1fr;gap:14px;padding:14px 16px}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.top-row{display:grid;grid-template-columns:minmax(300px,430px) 1fr;gap:14px}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.chart-card{padding:10px 10px 6px}
+.chart-card h3{margin-bottom:4px;padding-left:4px}
+.chart-card canvas{width:100%;height:200px;display:block}
+@media(max-width:1250px){.live{grid-template-columns:1fr}.top-row{grid-template-columns:1fr}}
+@media(max-width:900px){.charts{grid-template-columns:1fr}}
+
+.param{padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);margin-bottom:10px;position:relative}
+.param:last-child{margin-bottom:0}
+.p-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.p-name{font-weight:800;font-size:16px;color:var(--orange)}
+.p-esp{font-size:12px;color:var(--muted)}
+.p-esp b{font-family:var(--mono);color:var(--text)}
+.p-row{display:flex;gap:6px;margin-bottom:6px}
+.p-row input[type=text]{flex:1;min-width:0;font-family:var(--mono);font-size:15px;text-align:center}
+.p-row input.pend{border-color:var(--orange);box-shadow:0 0 0 2px var(--orange-dim)}
+.step{width:32px;background:var(--input);border:1px solid var(--line2);border-radius:7px;font-size:16px;font-weight:700}
+.step:hover{border-color:var(--orange);color:var(--orange)}
+.opt{display:flex;gap:7px;align-items:center;font-size:13px;color:var(--muted);cursor:pointer;margin-bottom:8px}
+
+.ctrl-state{display:flex;align-items:center;gap:8px;font-weight:700;margin-bottom:10px}
+.badge{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:800;letter-spacing:.06em;border:1px solid var(--line2);color:var(--muted)}
+.badge.on{background:var(--orange);border-color:var(--orange);color:#111;animation:pulse 1.4s infinite}
+.badge.nodata{color:#ffd400;border-color:#6b5a00}
+@keyframes pulse{50%{box-shadow:0 0 14px var(--orange)}}
+.cmd-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.cmd-grid .wide{grid-column:1/-1}
+.estop{background:var(--estopbg);border:2px solid var(--red);color:var(--dangertxt);font-weight:800;letter-spacing:.08em;padding:11px;border-radius:10px;width:100%;margin-top:8px}
+.estop:hover{background:var(--red);color:#fff}
+.hint{font-size:12px;color:var(--muted);margin-top:8px}
+kbd{background:var(--kbd);border:1px solid var(--line2);border-radius:4px;padding:0 5px;font-family:var(--mono);font-size:11px}
+
+.msgs{font-family:var(--mono);font-size:12px;display:flex;flex-direction:column;gap:3px;max-height:130px;overflow:auto}
+.msgs div{padding:2px 6px;border-left:2px solid var(--line2);color:var(--text2)}
+.msgs .w{border-color:var(--red);color:var(--dangertxt)}
+.msgs .i{border-color:var(--orange);color:var(--orange2)}
+
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-family:var(--mono);font-size:12.5px;padding:2px 8px;border-radius:6px;background:var(--tagbg);border:1px solid var(--line2)}
+.tag.kp{color:var(--orange2);border-color:var(--kpline)}
+.tag.kd{color:var(--text)}
+.tag.ki{color:var(--kicol);border-color:var(--kiline)}
+
+/* visualizador + lecturas */
+.viz-card{display:flex;flex-direction:column}
+#viz{width:100%;height:auto;display:block;background:var(--vizbg);border-radius:8px;border:1px solid var(--line)}
+.vref{stroke:var(--vref);stroke-width:2;stroke-dasharray:6 8}
+.vcut{stroke:var(--red);stroke-width:2;stroke-dasharray:4 10;opacity:.5}
+.viz-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;color:var(--muted)}
+.mbar{height:8px;background:var(--input);border:1px solid var(--line2);border-radius:5px;position:relative;margin-top:6px;overflow:hidden}
+.mbar i{position:absolute;top:0;bottom:0;background:var(--orange)}
+.mbar::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:#555}
+.reads{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-content:start}
+.read{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.read span{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.read b{font-family:var(--mono);font-size:28px;font-weight:600;line-height:1.25}
+.read.hero{border-color:var(--heroline);background:var(--hero)}
+.read.hero b{color:var(--orange)}
+.read small{color:var(--muted);font-size:12px;margin-left:3px}
+
+.charts-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+/* ---------- historial ---------- */
+.hist{display:grid;grid-template-columns:350px 1fr;gap:14px;padding:14px 16px}
+@media(max-width:1000px){.hist{grid-template-columns:1fr}}
+.filters{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}
+.filters input{width:100%;font-family:var(--mono)}
+.runlist{display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 250px);overflow:auto;padding-right:4px}
+.run{display:flex;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);cursor:pointer}
+.run:hover{border-color:var(--line2)}
+.run.focus{border-color:var(--orange);background:var(--focusbg)}
+.run input{margin-top:4px}
+.run .sw{width:4px;border-radius:2px;background:#333;flex:none}
+.run-meta{font-size:12px;color:var(--muted);margin-top:5px;font-family:var(--mono)}
+.run-date{font-size:11.5px;color:#6f6f78}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.empty{color:var(--muted);padding:30px 10px;text-align:center}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:6px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th{color:var(--muted);font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;position:sticky;top:0;background:var(--panel)}
+td:first-child,th:first-child{text-align:left}
+td{font-family:var(--mono)}
+.tbl-wrap{overflow:auto;max-height:260px}
+.hcharts{display:grid;grid-template-columns:1fr;gap:14px;margin-top:14px}
+.hcharts canvas{width:100%;height:210px;display:block}
+.sw-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+textarea{width:100%;min-height:54px;resize:vertical}
+
+/* ---------- consola ---------- */
+.console{padding:14px 16px;max-width:1100px}
+#log{height:calc(100vh - 230px);min-height:260px;overflow:auto;background:var(--logbg);border:1px solid var(--line);border-radius:10px;padding:10px;font-family:var(--mono);font-size:12.5px}
+#log div{white-space:pre-wrap;word-break:break-all}
+#log .tx{color:var(--orange2);font-weight:600}
+#log .rx{color:var(--text2)}
+#log .tel{color:#6d6d75}
+#log .info{color:#3b82f6}
+#log .err{color:var(--dangertxt)}
+
+#toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50}
+.toast{background:var(--toast);border:1px solid var(--orange);color:var(--text);padding:9px 14px;border-radius:9px;font-size:13px;max-width:360px;box-shadow:var(--shadow)}
+.toast.err{border-color:var(--red)}
+
+/* ---------- lectura (todo lo que reporta la ESP32) ---------- */
+.rd{padding:14px 16px;display:flex;flex-direction:column;gap:14px}
+.rd-status{display:flex;flex-wrap:wrap;gap:10px 28px;align-items:center}
+.chip span{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.chip b{font-family:var(--mono);font-size:16px}
+.rd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;align-items:start}
+.rd-charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px}
+.rd.stale .rd-grid,.rd.stale .rd-charts{opacity:.5}
+.gbar{margin-bottom:13px}
+.gbar:last-child{margin-bottom:0}
+.gb-head{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.gb-head em{font-style:normal;font-weight:800;min-width:92px;font-size:13px}
+.gb-head b{font-family:var(--mono);font-size:22px;font-weight:600;margin-left:auto}
+.gb-head small{color:var(--muted);font-size:12px;min-width:26px}
+.gb-track{position:relative;height:12px;background:var(--input);border:1px solid var(--line2);border-radius:6px;overflow:hidden}
+.gb-track i{position:absolute;top:0;bottom:0}
+.gb-track::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--muted);opacity:.6}
+.gb-scale{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:3px}
+.nums{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px}
+.nums.c3{grid-template-columns:repeat(3,1fr)}
+.nm{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:7px 10px;min-width:0}
+.nm span{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.nm b{font-family:var(--mono);font-size:20px;font-weight:600}
+.nm small{color:var(--muted);font-size:12px;margin-left:3px}
+.good{color:var(--green)}.warnc{color:#ffd400}.badc{color:var(--red)}
+#dial{width:100%;max-width:360px;display:block;margin:0 auto}
+.na{border:1px dashed var(--line2);border-radius:10px;padding:14px;color:var(--muted);font-size:13px}
+.na b{color:var(--text2)}
+table.kv td{padding:4px 9px}
+table.kv td.v{color:var(--text)}
+table.kv td.u{text-align:left;color:var(--muted);font-family:system-ui,sans-serif;width:1%}
+pre.rawline{margin:8px 0 0;padding:8px 10px;background:var(--logbg);border:1px solid var(--line);border-radius:8px;font:12px/1.4 var(--mono);color:var(--text2);white-space:pre-wrap;word-break:break-all}
+.txlist{display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:12.5px;max-height:220px;overflow:auto}
+.txlist div{display:flex;gap:10px;padding:2px 6px;border-left:2px solid var(--orange)}
+.txlist div span:first-child{color:var(--muted)}
+.txlist div b{color:var(--orange2);min-width:70px}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32"><rect x="5" y="9" width="22" height="14" rx="2" fill="#0c0c0e" stroke="#ff7a00" stroke-width="2"/><rect x="5" y="4" width="22" height="5" rx="1" fill="#ff7a00"/><circle cx="16" cy="23" r="6" fill="#0c0c0e" stroke="#ff7a00" stroke-width="2"/></svg>
+    <span>BALANC&Iacute;N <b>PID</b></span>
+  </div>
+  <nav class="tabs">
+    <button class="tab-btn on" data-tab="live">En vivo</button>
+    <button class="tab-btn" data-tab="read">Lectura</button>
+    <button class="tab-btn" data-tab="hist">Historial <span id="histCount" class="muted"></span></button>
+    <button class="tab-btn" data-tab="cons">Consola</button>
+  </nav>
+  <div class="spacer"></div>
+  <div class="conn">
+    <span class="dot" id="connDot"></span><span id="connLabel">Sin conexión</span>
+    <select id="baud" title="Baudios">
+      <option>9600</option><option>57600</option><option selected>115200</option><option>230400</option><option>460800</option><option>921600</option>
+    </select>
+    <button class="btn sm" id="btnTheme" title="Cambiar tema claro / oscuro"></button>
+    <input type="text" id="wsHost" value="balancin.local" placeholder="IP o balancin.local" title="IP de la ESP32 (la imprime el Monitor Serial) o balancin.local. Puerto 81 por defecto." style="width:150px;font-family:var(--mono)" autocomplete="off" spellcheck="false">
+    <button class="btn pri" id="btnWifi">Conectar WiFi</button>
+    <button class="btn" id="btnConnect">Conectar USB</button>
+    <button class="btn" id="btnSim">Simulador</button>
+    <button class="btn sm" id="btnKick" style="display:none">Empujón</button>
+  </div>
+</header>
+<div id="banner"></div>
+
+<!-- ===================== EN VIVO ===================== -->
+<section class="tab on" id="tab-live">
+<div class="live">
+
+  <aside class="col">
+    <div class="card">
+      <h3>Parámetros PID</h3>
+      <label class="opt"><input type="checkbox" id="liveSend"> Enviar al instante con deslizador y ± (si no, usa Enviar)</label>
+
+      <div class="hint" style="margin:-2px 0 10px">Escribe con punto o coma (0.5 / 0,5). Se envía con <b>Enviar</b> o <kbd>Enter</kbd>. Flechas ↑↓ y ± cambian 0.1 (con <kbd>Shift</kbd>, 1.0).</div>
+      <div class="param" data-k="kp">
+        <div class="p-head"><span class="p-name">Kp</span><span class="p-esp">ESP: <b id="esp-kp">—</b></span></div>
+        <div class="p-row"><button class="step" data-d="-1">−</button><input type="text" inputmode="decimal" autocomplete="off" spellcheck="false"><button class="step" data-d="1">+</button><button class="btn sm send">Enviar</button></div>
+        <input type="range" min="0" max="50" step="0.1">
+      </div>
+      <div class="param" data-k="kd">
+        <div class="p-head"><span class="p-name">Kd</span><span class="p-esp">ESP: <b id="esp-kd">—</b></span></div>
+        <div class="p-row"><button class="step" data-d="-1">−</button><input type="text" inputmode="decimal" autocomplete="off" spellcheck="false"><button class="step" data-d="1">+</button><button class="btn sm send">Enviar</button></div>
+        <input type="range" min="0" max="10" step="0.05">
+      </div>
+      <div class="param" data-k="ki">
+        <div class="p-head"><span class="p-name">Ki</span><span class="p-esp">ESP: <b id="esp-ki">—</b></span></div>
+        <div class="p-row"><button class="step" data-d="-1">−</button><input type="text" inputmode="decimal" autocomplete="off" spellcheck="false"><button class="step" data-d="1">+</button><button class="btn sm send">Enviar</button></div>
+        <input type="range" min="0" max="5" step="0.01">
+      </div>
+      <div class="param" data-k="tol">
+        <div class="p-head"><span class="p-name">Tolerancia ±°</span><span class="p-esp">ESP: <b id="esp-tol">—</b></span></div>
+        <div class="p-row"><button class="step" data-d="-1">−</button><input type="text" inputmode="decimal" autocomplete="off" spellcheck="false"><button class="step" data-d="1">+</button><button class="btn sm send">Enviar</button></div>
+        <input type="range" min="0" max="5" step="0.05">
+        <div class="hint" style="margin-top:6px">Si |error| ≤ tolerancia, P e I ven error 0 (comando <kbd>tol0.5</kbd>; <kbd>tol0</kbd> la desactiva). Cada tolerancia se guarda como corrida aparte en el historial.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Control</h3>
+      <div class="ctrl-state"><span>Estado</span><span class="badge" id="ctrlBadge">—</span></div>
+      <div class="cmd-grid">
+        <button class="btn pri wide" id="btnToggle">Activar control</button>
+        <button class="btn" id="btnZero" title="Comando z">Fijar cero</button>
+        <button class="btn" id="btnCal" title="Comando c">Recalibrar</button>
+      </div>
+      <button class="estop" id="btnStop">PARAR MOTORES</button>
+      <div class="hint"><kbd>Esc</kbd> también detiene. Primera prueba con las ruedas en el aire. Para <b>Fijar cero</b> / <b>Recalibrar</b> deja el balancín quieto.</div>
+    </div>
+
+    <div class="card">
+      <h3>Registro de historial</h3>
+      <label class="opt"><input type="checkbox" id="recOn" checked> Registrar datos</label>
+      <label class="opt"><input type="checkbox" id="recCtrl" checked> Solo con control activo</label>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Corrida actual (según Kp / Kd / Ki que reporta la ESP)</div>
+      <div class="tags" id="curRun"><span class="muted">—</span></div>
+      <div class="muted mono" id="curRunN" style="font-size:12px;margin-top:6px"></div>
+    </div>
+
+    <div class="card">
+      <h3>Mensajes de la ESP</h3>
+      <div class="msgs" id="msgs"><div class="muted">Sin mensajes</div></div>
+    </div>
+  </aside>
+
+  <div class="col">
+    <div class="top-row">
+      <div class="card viz-card">
+        <h3>Balancín (vista lateral)</h3>
+        <svg id="viz" viewBox="-420 -430 840 610">
+          <defs>
+            <linearGradient id="gPlate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffa21f"/><stop offset="1" stop-color="#e86a00"/></linearGradient>
+          </defs>
+          <line class="vref" x1="0" y1="0" x2="0" y2="-410"/>
+          <line class="vcut" x1="0" y1="0" x2="290" y2="-290"/>
+          <line class="vcut" x1="0" y1="0" x2="-290" y2="-290"/>
+          <text x="300" y="-296" fill="#ff4d4d" opacity=".6" font-size="22">−45°</text>
+          <text x="-352" y="-296" fill="#ff4d4d" opacity=".6" font-size="22">+45°</text>
+          <rect x="-410" y="135" width="820" height="40" style="fill:var(--gnd)"/>
+          <line id="vGround" x1="-410" y1="153" x2="410" y2="153" style="stroke:var(--gndline)" stroke-width="5" stroke-dasharray="18 34"/>
+          <line x1="-410" y1="135" x2="410" y2="135" style="stroke:var(--gndtop)" stroke-width="3"/>
+          <g id="vBody"><g transform="scale(-1 1)">
+            <rect x="-201" y="-175" width="404" height="249" rx="6" fill="#0c0c0e" stroke="#2c2c31" stroke-width="3"/>
+            <rect x="-62" y="-158" width="124" height="60" fill="#17171a"/>
+            <rect x="-150" y="-218" width="20" height="44" fill="#9a7416"/>
+            <rect x="133" y="-218" width="20" height="44" fill="#9a7416"/>
+            <rect x="-201" y="-237" width="404" height="19" fill="#8b7355"/>
+            <rect x="-201" y="-318" width="404" height="82" rx="3" fill="url(#gPlate)"/>
+            <rect x="-120" y="-278" width="244" height="42" fill="#0b0b0d"/>
+            <rect x="-112" y="-262" width="150" height="26" fill="#1d4a2a"/>
+            <rect x="-100" y="-270" width="26" height="8" fill="#bbb"/><rect x="-40" y="-270" width="26" height="8" fill="#bbb"/>
+            <rect x="48" y="-258" width="60" height="22" fill="#111"/>
+            <circle cx="-180" cy="-322" r="7" fill="#d4a017"/><circle cx="-40" cy="-322" r="7" fill="#d4a017"/>
+            <circle cx="40" cy="-322" r="7" fill="#d4a017"/><circle cx="182" cy="-322" r="7" fill="#d4a017"/>
+            <rect x="-139" y="-336" width="54" height="20" rx="3" fill="#e11d1d"/>
+            <rect x="203" y="-190" width="22" height="44" rx="3" fill="#222" stroke="#444" stroke-width="2"/>
+            </g><text x="-150" y="-196" fill="#8c8c95" font-size="22" text-anchor="middle">◀ FRENTE</text>
+          </g>
+          <g id="vWheel">
+            <circle r="135" fill="#0e0e10" stroke="#2b2b30" stroke-width="3"/>
+            <circle r="126" fill="none" stroke="#1f1f23" stroke-width="16" stroke-dasharray="14 8"/>
+            <circle r="100" fill="#141416" stroke="#6f5a2a" stroke-width="6"/>
+            <g id="vSpokes"></g>
+            <circle r="26" fill="#1c1c1f" stroke="#ff7a00" stroke-width="4"/>
+            <circle r="9" fill="#ff7a00"/>
+          </g>
+          <path id="vArc" fill="none" stroke="#ff7a00" stroke-width="5"/>
+          <line id="vTilt" x1="0" y1="0" x2="0" y2="-380" stroke="#ff7a00" stroke-width="3" opacity=".7"/>
+          <text id="vTxt" x="0" y="-395" fill="#ff7a00" font-size="34" font-family="ui-monospace,Consolas,monospace" font-weight="700" text-anchor="middle">0.0°</text>
+        </svg>
+        <div class="viz-foot"><span id="motorDir">Motores: —</span><label class="opt" style="margin:0"><input type="checkbox" id="invVis"> Invertir giro visual</label></div>
+        <div class="mbar"><i id="mbar" style="left:50%;width:0"></i></div>
+      </div>
+
+      <div class="reads">
+        <div class="read hero"><span>Ángulo</span><b id="rAng">—</b><small>°</small></div>
+        <div class="read hero"><span>Error</span><b id="rErr">—</b><small>°</small></div>
+        <div class="read"><span>de/dt</span><b id="rD">—</b><small>°/s</small></div>
+        <div class="read"><span>u (salida)</span><b id="rU">—</b></div>
+        <div class="read"><span>I (aporte integral)</span><b id="rI">—</b></div>
+        <div class="read"><span>PWM</span><b id="rPwm">—</b></div>
+        <div class="read"><span>Ts real</span><b id="rTs">—</b><small>ms</small></div>
+        <div class="read"><span>Datos/s</span><b id="rHz">—</b><small>Hz</small></div>
+        <div class="read"><span>Setpoint</span><b id="rSp">—</b><small>°</small></div>
+        <div class="read"><span>Muestras en vivo</span><b id="rN">0</b></div>
+      </div>
+    </div>
+
+    <div class="charts-bar">
+      <span class="muted">Ventana</span>
+      <select id="win"><option value="5">5 s</option><option value="10" selected>10 s</option><option value="30">30 s</option><option value="60">60 s</option><option value="120">2 min</option></select>
+      <button class="btn sm" id="btnPause">Pausar gráficas</button>
+      <button class="btn sm" id="btnClearLive">Limpiar</button>
+      <span class="muted" style="font-size:12px">Las gráficas siempre muestran lo que llega; el historial solo guarda según las opciones de “Registro”.</span>
+    </div>
+    <div class="charts">
+      <div class="card chart-card"><h3>Ángulo y setpoint (°)</h3><canvas id="cAng"></canvas></div>
+      <div class="card chart-card"><h3>Error (°)</h3><canvas id="cErr"></canvas></div>
+      <div class="card chart-card"><h3>Derivada del error (°/s)</h3><canvas id="cD"></canvas></div>
+      <div class="card chart-card"><h3>Salida u y PWM con signo</h3><canvas id="cU"></canvas></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ===================== LECTURA ===================== -->
+<section class="tab" id="tab-read">
+<div class="rd" id="rd">
+  <div class="card rd-status">
+    <div class="chip"><span>Conexión</span><b id="cConn">—</b></div>
+    <div class="chip"><span>Tramas/s</span><b id="cHz">—</b></div>
+    <div class="chip"><span>Último dato hace</span><b id="cAge">—</b></div>
+    <div class="chip"><span>Control</span><b id="cCtl">—</b></div>
+    <div class="chip"><span>Motores</span><b id="cMot">—</b></div>
+    <div class="spacer"></div>
+    <span class="muted" style="font-size:12px">Todo lo que reporta la ESP32 (cada 200 ms) y lo que le envías.</span>
+  </div>
+
+  <div class="rd-grid">
+    <div class="card">
+      <h3>Inclinación</h3>
+      <svg id="dial" viewBox="0 0 300 200">
+        <g id="dialStatic"></g>
+        <line id="dNeedle" x1="150" y1="160" x2="150" y2="50" stroke="#ff7a00" stroke-width="4" stroke-linecap="round"/>
+        <circle cx="150" cy="160" r="9" fill="#ff7a00"/>
+        <text id="dTxt" x="150" y="194" fill="#ff7a00" font-size="26" font-family="ui-monospace,Consolas,monospace" font-weight="700" text-anchor="middle">—</text>
+      </svg>
+      <div class="nums">
+        <div class="nm"><span>Medido (con cero)</span><b id="aMed">—</b><small>°</small></div>
+        <div class="nm"><span>Filtrado (sin cero)</span><b id="aFil">—</b><small>°</small></div>
+        <div class="nm"><span>Solo acelerómetro</span><b id="aAcc">—</b><small>°</small></div>
+        <div class="nm"><span>Acel − filtrado</span><b id="aDif">—</b><small>°</small></div>
+      </div>
+      <div class="hint">Si “Acel − filtrado” crece cuando el carro acelera, el acelerómetro se está confundiendo con la aceleración de las ruedas: el filtro debe confiar en el giroscopio.</div>
+    </div>
+
+    <div class="card">
+      <h3>MPU6050 · Acelerómetro</h3>
+      <div id="gAcc"></div>
+      <div class="gb-scale"><span>−1.5 g</span><span>0</span><span>+1.5 g</span></div>
+      <div class="nums"><div class="nm"><span>Módulo |a|</span><b id="aMod">—</b><small>g</small></div><div class="nm"><span>Referencia quieto</span><b>1.000</b><small>g</small></div></div>
+      <div class="hint">Quieto, |a| ≈ 1 g. Se aleja de 1 cuando el carro acelera o vibra.</div>
+    </div>
+
+    <div class="card">
+      <h3>MPU6050 · Giroscopio</h3>
+      <div id="gGyr"></div>
+      <div class="gb-scale"><span>−250 °/s</span><span>0</span><span>+250 °/s</span></div>
+      <div class="hint">El firmware usa el eje <b>Y</b> para inclinarse (<code>INCLINA_SOBRE_EJE_Y 1</code>) y le resta el offset de calibración. Quieto debe leer ≈ 0.</div>
+    </div>
+
+    <div class="card">
+      <h3>Control PID · aporte de cada término</h3>
+      <div id="gPid"></div>
+      <div class="gb-scale"><span>−255</span><span>0</span><span>+255</span></div>
+      <div class="nums c3">
+        <div class="nm"><span>Error</span><b id="pErr">—</b><small>°</small></div>
+        <div class="nm"><span>de/dt</span><b id="pD">—</b><small>°/s</small></div>
+        <div class="nm"><span>Zona tolerada</span><b id="pTol">—</b><small>°</small></div>
+      </div>
+      <div class="hint">P, I y D se recalculan aquí con Kp/Ki/Kd y el error que reporta la ESP; u es lo que reporta ella.</div>
+    </div>
+
+    <div class="card">
+      <h3>Motores y tiempos</h3>
+      <div id="gMot"></div>
+      <div class="gb-scale"><span>◀ adelante</span><span>0</span><span>reversa ▶</span></div>
+      <div class="nums c3">
+        <div class="nm"><span>PWM</span><b id="mPwm">—</b></div>
+        <div class="nm"><span>Ts real</span><b id="mTs">—</b><small>ms</small></div>
+        <div class="nm"><span>Ts máx. 5 s</span><b id="mTsMax">—</b><small>ms</small></div>
+      </div>
+      <div class="hint" id="mDir">—</div>
+      <div class="hint">Ts debe estar cerca de 10 ms. Picos grandes = el WiFi o el MPU están frenando el lazo.</div>
+    </div>
+
+    <div class="card">
+      <h3>Parámetros en la ESP</h3>
+      <div class="nums">
+        <div class="nm"><span>Kp</span><b id="qKp">—</b></div>
+        <div class="nm"><span>Ki</span><b id="qKi">—</b></div>
+        <div class="nm"><span>Kd</span><b id="qKd">—</b></div>
+        <div class="nm"><span>Tolerancia</span><b id="qTol">—</b><small>°</small></div>
+      </div>
+      <h3 style="margin-top:16px">Encoders</h3>
+      <div class="na"><b>Sin datos.</b> El firmware actual (<code>PID_Paso5_PID.ino</code>) no tiene encoders: solo lee el MPU6050 y manda PWM a los motores. Cuando agregues los encoders y la ESP imprima sus lecturas, aquí se muestran las RPM / pulsos.</div>
+    </div>
+  </div>
+
+  <div class="charts-bar">
+    <span class="muted">Ventana</span>
+    <select id="rWin"><option value="5">5 s</option><option value="10" selected>10 s</option><option value="30">30 s</option><option value="60">60 s</option></select>
+    <span class="muted" style="font-size:12px">Pasa el mouse sobre una gráfica para ver los valores.</span>
+  </div>
+  <div class="rd-charts">
+    <div class="card chart-card"><h3>Acelerómetro (g)</h3><canvas id="rcAcc"></canvas></div>
+    <div class="card chart-card"><h3>Giroscopio (°/s)</h3><canvas id="rcGyr"></canvas></div>
+    <div class="card chart-card"><h3>Ángulo: acelerómetro vs. filtrado vs. medido (°)</h3><canvas id="rcAng"></canvas></div>
+  </div>
+
+  <div class="rd-grid">
+    <div class="card">
+      <h3>Trama 1 · Control (ESP → PC)</h3>
+      <div id="kv1"></div>
+      <pre class="rawline" id="raw1">—</pre>
+    </div>
+    <div class="card">
+      <h3>Trama 2 · MPU6050 (ESP → PC)</h3>
+      <div id="kv2"></div>
+      <pre class="rawline" id="raw2">—</pre>
+    </div>
+    <div class="card">
+      <h3>Enviado a la ESP (PC → ESP)</h3>
+      <div class="txlist" id="txList"><div class="muted">Nada enviado todavía</div></div>
+      <h3 style="margin-top:16px">Mensajes de la ESP</h3>
+      <div class="msgs" id="rMsgs"></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ===================== HISTORIAL ===================== -->
+<section class="tab" id="tab-hist">
+<div class="hist">
+  <aside class="card">
+    <h3>Corridas por parámetros</h3>
+    <div class="filters">
+      <input type="text" id="fKp" placeholder="Kp">
+      <input type="text" id="fKd" placeholder="Kd">
+      <input type="text" id="fKi" placeholder="Ki">
+      <input type="text" id="fTol" placeholder="Tol">
+    </div>
+    <div class="muted" style="font-size:12px;margin-bottom:6px">Marca las que quieres comparar / exportar</div>
+    <div class="row" style="margin-bottom:10px"><button class="btn sm" id="selAll">Todas</button><button class="btn sm" id="selNone">Ninguna</button></div>
+    <div class="runlist" id="runList"></div>
+  </aside>
+
+  <div class="col">
+    <div class="card">
+      <h3>Exportar</h3>
+      <div class="toolbar" style="margin:0">
+        <button class="btn pri" id="xlsSel">Excel (seleccionadas)</button>
+        <button class="btn" id="xlsAll">Excel (todas)</button>
+        <button class="btn" id="csvSel">CSV (seleccionadas)</button>
+        <span class="spacer"></span>
+        <button class="btn danger" id="delSel">Eliminar seleccionadas</button>
+        <button class="btn danger" id="delAll">Borrar todo</button>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:8px">El Excel trae una hoja “Resumen”, una hoja “Datos” con todo (filtrable por Kp/Kd/Ki) y una hoja por cada corrida.</div>
+    </div>
+
+    <div class="card">
+      <h3>Comparativa</h3>
+      <div class="tbl-wrap" id="cmpWrap"></div>
+    </div>
+
+    <div class="hcharts">
+      <div class="card chart-card"><h3>Ángulo vs. tiempo activo (°)</h3><canvas id="hAng"></canvas></div>
+      <div class="card chart-card"><h3>Error (°)</h3><canvas id="hErr"></canvas></div>
+      <div class="card chart-card"><h3>Salida u</h3><canvas id="hU"></canvas></div>
+    </div>
+
+    <div class="card" id="detail" style="display:none">
+      <h3 id="detailTitle">Detalle</h3>
+      <textarea id="runNote" placeholder="Nota de esta corrida (ej: oscila con perturbación, estable en el suelo…)"></textarea>
+      <div class="muted" style="font-size:12px;margin:10px 0 6px" id="rawInfo"></div>
+      <div class="tbl-wrap" id="rawWrap"></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ===================== CONSOLA ===================== -->
+<section class="tab" id="tab-cons">
+<div class="console">
+  <div class="row" style="margin-bottom:10px;flex-wrap:wrap">
+    <input type="text" id="rawCmd" placeholder="Comando manual (ej: kp12, kd0.5, m, s, z, c)" style="flex:1;min-width:240px;font-family:var(--mono)">
+    <button class="btn pri" id="rawSend">Enviar</button>
+    <label class="opt" style="margin:0"><input type="checkbox" id="showTel"> Mostrar telemetría</label>
+    <button class="btn sm" id="logClear">Limpiar</button>
+  </div>
+  <div id="log"></div>
+</div>
+</section>
+
+<div id="toasts"></div>
+
+<script>
+'use strict';
+/* =====================================================================
+   BALANCÍN · Monitor PID  (WiFi/WebSocket o Web Serial → ESP32)
+   Telemetría esperada (PID_Paso5_PID.ino), igual por WiFi (ws://IP:81) que por USB:
+   Angulo: x | Error: x | de/dt: x | Kp: x | Kd: x | Ki: x | I: x | u: x | PWM: x | Ts real: x ms [CONTROL]
+   MPU -> Acel(g) X: x Y: x Z: x | Giro(grados/s) X: x Y: x Z: x | Ang acel: x | Ang filtrado (sin cero): x
+   Comandos (texto, uno por mensaje): kpNN  kdNN  kiNN  m  s  z  c
+   ===================================================================== */
+
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const fmtN = (v, d = 2) => (v == null || !isFinite(v)) ? '—' : (+v).toFixed(d);
+const trimN = v => v == null ? '—' : String(+(+v).toFixed(4));
+const CUT = 45;                       // CORTE_GRADOS del firmware
+const PALETTE = ['#ff7a00', 'ink', '#0aa5e0', '#d4a500', '#2fa866', '#e0306f', '#8a63d2', '#b5651d'];
+let TH = {};
+function readTheme() {
+  const cs = getComputedStyle(document.documentElement), g = k => cs.getPropertyValue(k).trim();
+  const light = document.documentElement.dataset.theme === 'light';
+  TH = { light, ink: light ? '#1b1b1f' : '#f2f2f2', amber: light ? '#d98a00' : '#ffc266', gridZero: light ? '#a8a296' : '#4a4a52', grid: light ? '#e8e4dc' : '#202024', gridX: light ? '#f0ede6' : '#17171a', axis: g('--muted'), legend: light ? '#4a4a52' : '#b4b4bc', hover: light ? '#00000055' : '#ffffff55', tipBg: light ? '#ffffffee' : '#0c0c0ef2', tipLine: light ? '#cfc9bd' : '#3a3a42', tipText: light ? '#1b1b1f' : '#ececee', off: light ? '#cfc9bd' : '#333' };
+}
+const rc = c => c === 'ink' ? TH.ink : c === 'amber' ? TH.amber : c;
+readTheme();
+
+function toast(msg, err) {
+  const d = document.createElement('div');
+  d.className = 'toast' + (err ? ' err' : '');
+  d.textContent = msg;
+  $('#toasts').appendChild(d);
+  setTimeout(() => d.remove(), 4200);
+}
+
+/* =====================================================================
+   Gráficas (canvas propio, sin dependencias)
+   ===================================================================== */
+function niceTicks(lo, hi, n) {
+  const span = hi - lo || 1, raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), nm = raw / mag;
+  const step = (nm < 1.5 ? 1 : nm < 3 ? 2 : nm < 7 ? 5 : 10) * mag;
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-6; v += step) out.push(+v.toPrecision(12));
+  return { ticks: out, step };
+}
+function lowerBound(arr, x) {           // primer índice con arr[i] >= x
+  let a = 0, b = arr.length;
+  while (a < b) { const m = (a + b) >> 1; if (arr[m] < x) a = m + 1; else b = m; }
+  return a;
+}
+
+class Chart {
+  constructor(canvas, o = {}) {
+    this.c = canvas; this.ctx = canvas.getContext('2d');
+    this.o = Object.assign({ minSpan: 1, zero: true, pad: [50, 12, 24, 22], xFmt: v => v.toFixed(0) + 's' }, o);
+    this.series = []; this.xr = [0, 1]; this.hover = null; this.w = 0; this.h = 0;
+    canvas.addEventListener('mousemove', e => { this.hover = e.clientX - canvas.getBoundingClientRect().left; this.draw(); });
+    canvas.addEventListener('mouseleave', () => { this.hover = null; this.draw(); });
+    new ResizeObserver(() => this.resize()).observe(canvas);
+  }
+  resize() {
+    const r = this.c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    this.w = r.width; this.h = r.height;
+    this.c.width = Math.max(1, Math.round(r.width * d)); this.c.height = Math.max(1, Math.round(r.height * d));
+    this.ctx.setTransform(d, 0, 0, d, 0, 0);
+    this.draw();
+  }
+  set(series, xr) { this.series = series; this.xr = xr; this.draw(); }
+  draw() {
+    const ctx = this.ctx, w = this.w, h = this.h;
+    if (!w || !h) return;
+    ctx.clearRect(0, 0, w, h);
+    const [pl, pr, pt, pb] = this.o.pad, pw = w - pl - pr, ph = h - pt - pb;
+    const [x0, x1] = this.xr;
+    let lo = Infinity, hi = -Infinity;
+    for (const s of this.series) {
+      for (let i = lowerBound(s.x, x0); i < s.x.length && s.x[i] <= x1; i++) {
+        const v = s.y[i]; if (v < lo) lo = v; if (v > hi) hi = v;
+      }
+    }
+    if (!isFinite(lo)) { lo = -1; hi = 1; }
+    if (this.o.zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+    if (hi - lo < this.o.minSpan) { const m = (hi + lo) / 2; lo = m - this.o.minSpan / 2; hi = m + this.o.minSpan / 2; }
+    const py = (hi - lo) * 0.08; lo -= py; hi += py;
+    const X = v => pl + (v - x0) / (x1 - x0 || 1) * pw, Y = v => pt + (1 - (v - lo) / (hi - lo)) * ph;
+
+    ctx.font = '11px ui-monospace,Consolas,monospace';
+    ctx.textBaseline = 'middle';
+    // rejilla Y
+    const ty = niceTicks(lo, hi, Math.max(3, Math.floor(ph / 38)));
+    const dec = ty.step >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log10(ty.step)));
+    ctx.textAlign = 'right';
+    for (const v of ty.ticks) {
+      const y = Y(v);
+      ctx.strokeStyle = Math.abs(v) < ty.step * 1e-6 ? TH.gridZero : TH.grid; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pl, y + .5); ctx.lineTo(w - pr, y + .5); ctx.stroke();
+      ctx.fillStyle = TH.axis; ctx.fillText(v.toFixed(dec), pl - 6, y);
+    }
+    // rejilla X
+    const tx = niceTicks(x0, x1, Math.max(3, Math.floor(pw / 90)));
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (const v of tx.ticks) {
+      const x = X(v);
+      ctx.strokeStyle = TH.gridX; ctx.beginPath(); ctx.moveTo(x + .5, pt); ctx.lineTo(x + .5, pt + ph); ctx.stroke();
+      ctx.fillStyle = TH.axis; ctx.fillText(this.o.xFmt(v), x, pt + ph + 6);
+    }
+    // series
+    ctx.save(); ctx.beginPath(); ctx.rect(pl, pt, pw, ph); ctx.clip();
+    for (const s of this.series) {
+      ctx.strokeStyle = rc(s.color); ctx.lineWidth = s.width || 1.8; ctx.setLineDash(s.dash || []);
+      ctx.beginPath();
+      let started = false, i0 = Math.max(0, lowerBound(s.x, x0) - 1);
+      for (let i = i0; i < s.x.length; i++) {
+        const x = X(s.x[i]), y = Y(s.y[i]);
+        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        if (s.x[i] > x1) break;
+      }
+      ctx.stroke();
+    }
+    ctx.restore(); ctx.setLineDash([]);
+    // leyenda
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    let lx = pl + 4;
+    for (const s of this.series) {
+      if (!s.name) continue;
+      ctx.fillStyle = rc(s.color); ctx.fillRect(lx, 5, 10, 3);
+      ctx.fillStyle = TH.legend; ctx.fillText(s.name, lx + 14, 7);
+      lx += 22 + ctx.measureText(s.name).width + 10;
+    }
+    // hover
+    if (this.hover != null && this.hover >= pl && this.hover <= w - pr) {
+      const hx = x0 + (this.hover - pl) / pw * (x1 - x0);
+      ctx.strokeStyle = TH.hover; ctx.beginPath(); ctx.moveTo(this.hover + .5, pt); ctx.lineTo(this.hover + .5, pt + ph); ctx.stroke();
+      const rows = [];
+      for (const s of this.series) {
+        if (!s.x.length) continue;
+        let i = lowerBound(s.x, hx);
+        if (i > 0 && (i >= s.x.length || hx - s.x[i - 1] < s.x[i] - hx)) i--;
+        if (Math.abs(s.x[i] - hx) > (x1 - x0) * 0.05) continue;
+        ctx.fillStyle = rc(s.color); ctx.beginPath(); ctx.arc(X(s.x[i]), Y(s.y[i]), 3.5, 0, 7); ctx.fill();
+        rows.push([rc(s.color), (s.name || '') + ' ' + s.y[i].toFixed(2)]);
+      }
+      if (rows.length) {
+        ctx.textBaseline = 'middle';
+        const bw = Math.max(...rows.map(r => ctx.measureText(r[1]).width)) + 26, bh = rows.length * 16 + 8;
+        let bx = this.hover + 12; if (bx + bw > w - 4) bx = this.hover - bw - 12;
+        ctx.fillStyle = TH.tipBg; ctx.strokeStyle = TH.tipLine; ctx.beginPath(); ctx.rect(bx, pt + 4, bw, bh); ctx.fill(); ctx.stroke();
+        rows.forEach((r, k) => {
+          ctx.fillStyle = r[0]; ctx.fillRect(bx + 7, pt + 8 + k * 16 + 5, 8, 3);
+          ctx.fillStyle = TH.tipText; ctx.fillText(r[1], bx + 20, pt + 8 + k * 16 + 7);
+        });
+      }
+    }
+  }
+}
+
+/* =====================================================================
+   Historial (corridas por Kp / Kd / Ki) + estadísticas + persistencia
+   ===================================================================== */
+const STORE_KEY = 'balancin_pid_runs_v1';
+const H = {
+  runs: [], sel: new Set(), focus: null, dirty: false, nextId: 1,
+  load() {
+    try {
+      const j = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+      if (j && Array.isArray(j.runs)) { this.runs = j.runs; this.nextId = j.nextId || (Math.max(0, ...j.runs.map(r => r.id)) + 1); }
+    } catch (e) { /* sin almacenamiento */ }
+    if (this.runs.length) { const last = this.runs[this.runs.length - 1]; this.sel.add(last.id); this.focus = last.id; }
+  },
+  save() {
+    if (!this.dirty) return;
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ runs: this.runs, nextId: this.nextId })); this.dirty = false; }
+    catch (e) { if (!this.warned) { this.warned = true; toast('No se pudo guardar el historial en el navegador (lleno). Exporta a Excel.', true); } }
+  },
+  same(a, b) { return (a == null && b == null) || (a != null && b != null && Math.abs(a - b) < 1e-6); },
+  find(kp, kd, ki, tol) { return this.runs.find(r => this.same(r.kp, kp) && this.same(r.kd, kd) && this.same(r.ki, ki) && this.same(r.tol, tol)); },
+  get(kp, kd, ki, tol) {
+    let r = this.find(kp, kd, ki, tol);
+    if (!r) {
+      r = { id: this.nextId++, kp, kd, ki, tol, created: Date.now(), note: '', t: [], ang: [], err: [], d: [], u: [], pwm: [], ts: [], ctrl: [] };
+      this.runs.push(r); this.sel.add(r.id); this.focus = r.id;
+    }
+    return r;
+  },
+  add(s) {
+    const r = this.get(s.kp, s.kd, s.ki, s.tol);
+    r.t.push(+((Date.now() - r.created) / 1000).toFixed(3));
+    r.ang.push(s.ang); r.err.push(s.err); r.d.push(s.d); r.u.push(s.u); r.pwm.push(s.pwm); r.ts.push(s.ts); r.ctrl.push(s.ctrl ? 1 : 0);
+    this.dirty = true;
+    return r;
+  },
+  remove(ids) { this.runs = this.runs.filter(r => !ids.includes(r.id)); ids.forEach(i => this.sel.delete(i)); if (ids.includes(this.focus)) this.focus = null; this.dirty = true; this.save(); }
+};
+function runName(r) { return `Kp ${trimN(r.kp)} · Kd ${trimN(r.kd)}` + (r.ki != null ? ` · Ki ${trimN(r.ki)}` : '') + (r.tol != null ? ` · Tol ±${trimN(r.tol)}` : ''); }
+function runShort(r) { return `Kp${trimN(r.kp)} Kd${trimN(r.kd)}` + (r.ki != null ? ` Ki${trimN(r.ki)}` : '') + (r.tol != null ? ` Tol${trimN(r.tol)}` : ''); }
+
+function activeTime(r) {               // tiempo acumulado colapsando huecos largos
+  const out = new Array(r.t.length); let acc = 0;
+  for (let i = 0; i < r.t.length; i++) { if (i) acc += Math.min(r.t[i] - r.t[i - 1], 0.5); out[i] = +acc.toFixed(3); }
+  return out;
+}
+const statCache = new Map();
+function runStats(r) {
+  const c = statCache.get(r.id);
+  if (c && c.n === r.t.length) return c.st;
+  let idx = []; for (let i = 0; i < r.t.length; i++) if (r.ctrl[i]) idx.push(i);
+  const usedCtrl = idx.length > 0;
+  if (!usedCtrl) idx = r.t.map((_, i) => i);
+  let se = 0, ae = 0, emax = 0, sa = 0, sa2 = 0, band = 0, au = 0, sat = 0;
+  for (const i of idx) {
+    const e = r.err[i], a = r.ang[i], u = r.u[i];
+    se += e * e; ae += Math.abs(e); emax = Math.max(emax, Math.abs(e)); sa += a; sa2 += a * a;
+    if (Math.abs(e) < 2) band++; au += Math.abs(u); if (Math.abs(u) >= 255) sat++;
+  }
+  const n = idx.length || 1, m = sa / n;
+  const at = activeTime(r);
+  const st = {
+    n: r.t.length, nUsed: idx.length, usedCtrl, dur: at.length ? at[at.length - 1] : 0,
+    rmse: Math.sqrt(se / n), mae: ae / n, emax, std: Math.sqrt(Math.max(0, sa2 / n - m * m)),
+    band: band / n * 100, uMean: au / n, sat: sat / n * 100
+  };
+  statCache.set(r.id, { n: r.t.length, st });
+  return st;
+}
+const fmtDur = s => { s = Math.round(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+
+/* =====================================================================
+   Exportación: XLSX propio (zip sin compresión) y CSV
+   ===================================================================== */
+/*XLSX-START*/
+const crcTable = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = crcTable[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipStore(files) {
+  const enc = new TextEncoder(), chunks = [], central = []; let offset = 0;
+  const d = new Date(), dt = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), dd = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  for (const f of files) {
+    const name = enc.encode(f.name), data = enc.encode(f.text), crc = crc32(data), size = data.length;
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true);
+    lh.setUint16(10, dt, true); lh.setUint16(12, dd, true); lh.setUint32(14, crc, true); lh.setUint32(18, size, true); lh.setUint32(22, size, true);
+    lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+    chunks.push(new Uint8Array(lh.buffer), name, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true);
+    ch.setUint16(12, dt, true); ch.setUint16(14, dd, true); ch.setUint32(16, crc, true); ch.setUint32(20, size, true); ch.setUint32(24, size, true);
+    ch.setUint16(28, name.length, true); ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), name);
+    offset += 30 + name.length + size;
+  }
+  let cd = 0; for (const c of central) cd += c.length;
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, cd, true); end.setUint32(16, offset, true);
+  return new Blob([...chunks, ...central, new Uint8Array(end.buffer)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+function xmlEsc(s) { return String(s).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function colName(i) { let s = ''; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+function sheetXml(rows, widths) {
+  const out = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'];
+  if (widths) out.push('<cols>' + widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('') + '</cols>');
+  out.push('<sheetData>');
+  rows.forEach((row, ri) => {
+    out.push(`<row r="${ri + 1}">`);
+    row.forEach((v, ci) => {
+      if (v == null || v === '') return;
+      const ref = colName(ci) + (ri + 1), st = ri === 0 ? ' s="1"' : '';
+      if (typeof v === 'number') { if (isFinite(v)) out.push(`<c r="${ref}"${st}><v>${v}</v></c>`); }
+      else out.push(`<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`);
+    });
+    out.push('</row>');
+  });
+  out.push('</sheetData>');
+  const nc = Math.max(1, ...rows.map(r => r.length));
+  out.push(`<autoFilter ref="A1:${colName(nc - 1)}${Math.max(1, rows.length)}"/></worksheet>`);
+  return out.join('');
+}
+function buildXlsx(sheets) {          // sheets: [{name, rows, widths}]
+  const used = new Set();
+  const names = sheets.map(s => {
+    let n = s.name.replace(/[\[\]:*?\/\\]/g, '_').slice(0, 31) || 'Hoja', k = 2, base = n;
+    while (used.has(n.toLowerCase())) { n = base.slice(0, 28) + '_' + k++; }
+    used.add(n.toLowerCase()); return n;
+  });
+  const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const files = [
+    { name: '[Content_Types].xml', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('') + '</Types>' },
+    { name: '_rels/.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: 'xl/workbook.xml', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="${NS}" xmlns:r="${R}"><sheets>` + names.map((n, i) => `<sheet name="${xmlEsc(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('') + '</sheets></workbook>' },
+    { name: 'xl/_rels/workbook.xml.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('') + `<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
+    { name: 'xl/styles.xml', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="${NS}"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FF000000"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFF8A1F"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>` }
+  ];
+  sheets.forEach((s, i) => files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, text: sheetXml(s.rows, s.widths) }));
+  return zipStore(files);
+}
+/*XLSX-END*/
+
+const r4 = v => (v == null || !isFinite(v)) ? null : +(+v).toFixed(4);
+const RUN_COLS = ['Muestra', 'Tiempo activo (s)', 'Ángulo (°)', 'Setpoint (°)', 'Error (°)', 'de/dt (°/s)', 'u', 'PWM', 'Ts real (ms)', 'Control ON', 'Kp', 'Kd', 'Ki', 'Tol (°)'];
+function runRows(r, withName) {
+  const at = activeTime(r), rows = [];
+  for (let i = 0; i < r.t.length; i++) {
+    const row = [i + 1, at[i], r4(r.ang[i]), r4(r.ang[i] + r.err[i]), r4(r.err[i]), r4(r.d[i]), r4(r.u[i]), r.pwm[i], r.ts[i], r.ctrl[i], r4(r.kp), r4(r.kd), r4(r.ki), r4(r.tol)];
+    rows.push(withName ? [runShort(r), ...row] : row);
+  }
+  return rows;
+}
+function exportXlsx(runs, fname) {
+  if (!runs.length) { toast('No hay corridas para exportar', true); return; }
+  const sum = [['Corrida #', 'Kp', 'Kd', 'Ki', 'Tol (°)', 'Muestras', 'Muestras analizadas', 'Duración activa (s)', 'RMSE error (°)', 'Error medio abs. (°)', 'Error máx. (°)', 'Desv. ángulo (°)', '% tiempo |e|<2°', '|u| medio', '% saturación', 'Inicio', 'Nota']];
+  runs.forEach((r, i) => { const s = runStats(r); sum.push([i + 1, r4(r.kp), r4(r.kd), r4(r.ki), r4(r.tol), s.n, s.nUsed, s.dur, r4(s.rmse), r4(s.mae), r4(s.emax), r4(s.std), r4(s.band), r4(s.uMean), r4(s.sat), new Date(r.created).toLocaleString('es'), r.note || '']); });
+  const sheets = [{ name: 'Resumen', rows: sum, widths: [10, 8, 8, 8, 8, 10, 12, 12, 12, 14, 12, 12, 14, 10, 12, 20, 40] }];
+  const all = [['Corrida', ...RUN_COLS]]; runs.forEach(r => runRows(r, true).forEach(x => all.push(x)));
+  sheets.push({ name: 'Datos', rows: all, widths: [22, 9, 14, 11, 12, 11, 12, 10, 8, 11, 10, 8, 8, 8, 8] });
+  runs.forEach(r => sheets.push({ name: runShort(r), rows: [RUN_COLS, ...runRows(r, false)], widths: [9, 14, 11, 12, 11, 12, 10, 8, 11, 10, 8, 8, 8, 8] }));
+  download(buildXlsx(sheets), fname);
+}
+function exportCsv(runs, fname) {
+  if (!runs.length) { toast('No hay corridas para exportar', true); return; }
+  const lines = [['Corrida', ...RUN_COLS].join(',')];
+  runs.forEach(r => runRows(r, true).forEach(x => lines.push(x.map(v => v == null ? '' : typeof v === 'string' ? '"' + v.replace(/"/g, '""') + '"' : v).join(','))));
+  download(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), fname);
+}
+function download(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast('Archivo generado: ' + name);
+}
+const stamp = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; };
+
+/* =====================================================================
+   Simulador del balancín (misma salida de texto que el firmware)
+   ===================================================================== */
+function createSim(emit) {
+  const dt = 0.01;
+  let kp = 10, kd = 0, ki = 0, tol = 0.5, ctrl = false, th = 3, w = 0, tUser = 0, noise = 0;
+  let ePrev = 0, dFil = 0, integ = 0, first = true, u = 0, pwm = 0, tick = 0, thPrev = 0, rate = 0;
+  const A = 60, C = 12, FR = 1.4;
+  const out = (s) => emit(s);
+  function loopStep() {
+    if (!ctrl) { tUser += dt; th = 6 * Math.sin(tUser * 0.7) + 2 * Math.sin(tUser * 2.3); w = 0; }
+    else {
+      const ue = Math.abs(u) < 2 ? 0 : Math.sign(u) * Math.min(255, Math.abs(u));
+      const acc = A * th + C * ue - FR * w;
+      w += acc * dt; th += w * dt;
+    }
+    rate = (th - thPrev) / dt; thPrev = th;
+    const thm = th + (Math.random() - .5) * 0.12;
+    const e = 0 - thm;
+    const dRaw = first ? 0 : (e - ePrev) / dt;
+    dFil = 0.3 * dRaw + 0.7 * dFil; ePrev = e; first = false;
+    const eCtl = Math.abs(e) <= tol ? 0 : e;      // tolerancia: dentro de ±tol, P e I ven error 0
+    if (ctrl) integ = clamp(integ + eCtl * dt, -60, 60); else integ = 0;
+    u = kp * eCtl + kd * dFil + ki * integ;
+    if (ctrl && Math.abs(thm) > CUT) { ctrl = false; first = true; pwm = 0; out('!!! Angulo fuera de rango: control desactivado'); }
+    let mag = Math.abs(u);
+    if (!ctrl || mag < 2) pwm = 0; else { mag = Math.min(mag, 255); pwm = Math.round(((10 + (int(mag * 245 / 255))) + (19 + int(mag * 236 / 255))) / 2); }
+    tick++;
+    if (tick % 20 === 0) {
+      out(`Angulo: ${thm.toFixed(2)} | Error: ${e.toFixed(2)} | de/dt: ${dFil.toFixed(1)} | Kp: ${kp.toFixed(2)} | Kd: ${kd.toFixed(2)} | Ki: ${ki.toFixed(3)} | I: ${(ki * integ).toFixed(1)} | Tol: ${tol.toFixed(2)} | u: ${u.toFixed(2)} | PWM: ${ctrl ? pwm : 0} | Ts real: ${10 + (Math.random() < .05 ? 1 : 0)} ms${ctrl ? ' [CONTROL]' : ''}`);
+      const rad = th * Math.PI / 180, nz = (k) => ((Math.random() - .5) * k);
+      out(`   MPU -> Acel(g) X: ${(-Math.sin(rad) + nz(.02)).toFixed(3)} Y: ${nz(.02).toFixed(3)} Z: ${(Math.cos(rad) + nz(.02)).toFixed(3)} | Giro(grados/s) X: ${nz(1).toFixed(1)} Y: ${(rate + nz(1)).toFixed(1)} Z: ${nz(1).toFixed(1)} | Ang acel: ${(thm + nz(1.2)).toFixed(2)} | Ang filtrado (sin cero): ${(thm + 0.2).toFixed(2)}`);
+    }
+  }
+  const int = Math.trunc;
+  const timer = setInterval(loopStep, 10);
+  setTimeout(() => out('=== PID Paso 5 (SIMULADOR) listo: c | z | kp<num> kd<num> ki<num> | m | s ==='), 50);
+  return {
+    write(cmd) {
+      const c = cmd.trim();
+      if (/^c$/i.test(c)) { ctrl = false; first = true; out('>>> Recalibrando MPU6050, mantenlo quieto...'); setTimeout(() => out('>>> Recalibracion completa'), 800); }
+      else if (/^z$/i.test(c)) { first = true; out('>>> CERO fijado. El sensor marcaba 0.00 grados en equilibrio (ahora marca 0).'); }
+      else if (/^m$/i.test(c)) { ctrl = !ctrl; first = true; integ = 0; out(ctrl ? '>>> CONTROL ACTIVADO' : '>>> Control desactivado'); }
+      else if (/^s$/i.test(c)) { ctrl = false; out('>>> Detenido'); }
+      else if (/^tol/i.test(c) && c.length > 3) {
+        const m = c.match(/\d+(\.\d+)?/);
+        if (!m) { out('!!! Escribe tol seguido de un numero. Ej: tol0.5'); return; }
+        tol = clamp(parseFloat(m[0]), 0, 5); integ = 0; out('>>> Tolerancia = +-' + tol.toFixed(2) + ' grados');
+      }
+      else if (/^k/i.test(c) && c.length > 1) {
+        const m = c.match(/-?\d+(\.\d+)?/);
+        if (!m) { out('!!! Escribe kp, kd o ki seguido de un numero. Ej: kp10  kd0.5'); return; }
+        const v = parseFloat(m[0]), which = c[1].toLowerCase();
+        if (which === 'd') { kd = v; out('>>> Kd = ' + v.toFixed(3)); }
+        else if (which === 'i') { ki = v; integ = 0; out('>>> Ki = ' + v.toFixed(3)); }
+        else { kp = v; out('>>> Kp = ' + v.toFixed(3)); }
+      }
+    },
+    kick() { if (ctrl) w += 160; else toast('Activa el control para ver la respuesta al empujón'); },
+    close() { clearInterval(timer); }
+  };
+}
+
+/* =====================================================================
+   Estado global + conexión
+   ===================================================================== */
+const S = {
+  conn: null, mode: null, t0: performance.now(),
+  samples: [], esp: { kp: null, kd: null, ki: null, tol: null }, ctrl: false, lastRx: 0,
+  paused: false, pausedAt: 0, hz: 0, hzBuf: [], dirtyCharts: true,
+  recSamples: 0, curRun: null,
+  mpu: null, mpuSamples: [], rawTel: '', rawMpu: '', txLog: []
+};
+
+function setConnUI(mode, label, warn) {
+  S.mode = mode;
+  $('#connDot').className = 'dot' + (warn ? ' warn' : mode === 'serial' || mode === 'ws' ? ' on' : mode === 'sim' ? ' sim' : '');
+  $('#connLabel').textContent = label;
+  $('#btnConnect').textContent = mode === 'serial' ? 'Desconectar USB' : 'Conectar USB';
+  $('#btnWifi').textContent = mode === 'ws' ? 'Desconectar WiFi' : 'Conectar WiFi';
+  $('#btnSim').textContent = mode === 'sim' ? 'Detener simulador' : 'Simulador';
+  $('#btnKick').style.display = mode === 'sim' ? '' : 'none';
+  $('#btnConnect').disabled = mode === 'sim' || mode === 'ws';
+  $('#btnWifi').disabled = mode === 'sim' || mode === 'serial';
+  $('#btnSim').disabled = mode === 'serial' || mode === 'ws';
+  $('#baud').disabled = mode != null; $('#wsHost').disabled = mode != null;
+}
+
+let serial = null;      // {port, reader, writer, buf}
+async function connectSerial() {
+  if (!('serial' in navigator)) { toast('Este navegador no soporta Web Serial. Usa Chrome o Edge.', true); return; }
+  try {
+    const port = await navigator.serial.requestPort();
+    const baud = +$('#baud').value;
+    await port.open({ baudRate: baud });
+    try { await port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch (e) { }
+    const writer = port.writable.getWriter();
+    serial = { port, writer, reader: null, closing: false, wq: Promise.resolve() };
+    S.conn = {
+      write: (txt) => { serial.wq = serial.wq.then(() => writer.write(new TextEncoder().encode(txt + '\n'))).catch(e => log('err', 'Error al escribir: ' + e.message)); },
+      close: disconnect
+    };
+    resetSession();
+    setConnUI('serial', 'Conectado · ' + baud + ' baud');
+    log('info', 'Puerto abierto a ' + baud + ' baud');
+    readLoop(port);
+  } catch (e) {
+    if (e.name !== 'NotFoundError') { toast('No se pudo abrir el puerto: ' + e.message, true); log('err', e.message); }
+  }
+}
+async function readLoop(port) {
+  const dec = new TextDecoder(); let buf = '';
+  while (port.readable && !serial.closing) {
+    const reader = port.readable.getReader(); serial.reader = reader;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) { onLine(buf.slice(0, i)); buf = buf.slice(i + 1); }
+        if (buf.length > 4000) buf = '';
+      }
+    } catch (e) { if (!serial.closing) { log('err', 'Lectura interrumpida: ' + e.message); toast('Se perdió la conexión con la ESP', true); } }
+    finally { reader.releaseLock(); }
+    if (serial.closing) break;
+    if (!port.readable) break;
+  }
+  if (!serial.closing) disconnect();
+}
+/* ---------- WiFi (WebSocket al ESP32, puerto 81) ---------- */
+let wsSt = null;        // {host, ws, timer, closing}
+function connectWS() {
+  const host = $('#wsHost').value.trim().replace(/^(wss?|https?):\/\//i, '').replace(/\/.*$/, '');
+  if (!host) { toast('Escribe la IP de la ESP32 o balancin.local', true); return; }
+  try { localStorage.setItem('balancin_ws_host', host); } catch (e) { }
+  const st = wsSt = { host: host.includes(':') ? host : host + ':81', ws: null, timer: null, closing: false, opened: false };
+  resetSession();
+  S.conn = {
+    write: (txt) => {
+      if (st.ws && st.ws.readyState === 1) { st.ws.send(txt); return true; }
+      toast('Sin conexión WiFi con la ESP (reconectando…)', true); log('err', 'No enviado (sin enlace): ' + txt);
+      return false;
+    },
+    close: disconnect
+  };
+  setConnUI('ws', 'Conectando a ' + st.host + '…', true);
+  log('info', 'Conectando por WiFi a ws://' + st.host);
+  openWS(st);
+}
+function openWS(st) {
+  if (st.closing) return;
+  let ws;
+  try { ws = new WebSocket('ws://' + st.host); }
+  catch (e) { toast('Dirección no válida: ' + e.message, true); disconnect(); return; }
+  st.ws = ws;
+  ws.onopen = () => { st.opened = true; setConnUI('ws', 'WiFi · ' + st.host); log('info', 'WiFi conectado a ' + st.host); toast('Conectado por WiFi'); };
+  ws.onmessage = ev => { String(ev.data).split('\n').forEach(onLine); };
+  ws.onerror = () => { };           // el detalle llega en onclose
+  ws.onclose = () => {
+    if (st.closing) return;
+    if (st.opened) { st.opened = false; log('err', 'Se perdió el enlace WiFi; reintentando…'); toast('Se perdió el enlace WiFi con la ESP', true); }
+    setConnUI('ws', 'Reconectando a ' + st.host + '…', true);
+    st.timer = setTimeout(() => openWS(st), 2000);
+  };
+}
+async function disconnect() {
+  if (S.mode === 'ws') {
+    const st = wsSt; wsSt = null; S.conn = null;
+    if (st) { st.closing = true; clearTimeout(st.timer); try { st.ws && st.ws.close(); } catch (e) { } }
+    setConnUI(null, 'Sin conexión'); log('info', 'WiFi desconectado'); markCtrl(false); return;
+  }
+  if (S.mode === 'sim') { S.conn.close(); S.conn = null; setConnUI(null, 'Sin conexión'); log('info', 'Simulador detenido'); markCtrl(false); return; }
+  if (!serial) return;
+  const s = serial; serial = null; s.closing = true; S.conn = null;
+  try { await s.reader?.cancel(); } catch (e) { }
+  try { s.writer.releaseLock(); } catch (e) { }
+  try { await s.port.close(); } catch (e) { }
+  setConnUI(null, 'Sin conexión'); log('info', 'Puerto cerrado'); markCtrl(false);
+}
+function startSim() {
+  resetSession();
+  S.conn = createSim(onLine);
+  setConnUI('sim', 'Simulador (datos ficticios)');
+  log('info', 'Simulador iniciado');
+}
+function send(cmd, quiet) {
+  if (!S.conn) { toast('No hay conexión con la ESP', true); return false; }
+  if (S.conn.write(cmd) === false) return false;
+  S.txLog.unshift({ t: Date.now(), cmd }); if (S.txLog.length > 30) S.txLog.pop();
+  log('tx', '> ' + cmd);
+  return true;
+}
+function resetSession() { S.t0 = performance.now(); S.samples.length = 0; S.esp = { kp: null, kd: null, ki: null, tol: null }; S.lastRx = 0; S.curRun = null; S.mpu = null; S.mpuSamples.length = 0; S.rawTel = ''; S.rawMpu = ''; }
+
+/* =====================================================================
+   Procesamiento de líneas / telemetría
+   ===================================================================== */
+function parseTelemetry(line) {
+  if (!/^Angulo\s*:/i.test(line)) return null;
+  const o = {};
+  for (const part of line.split('|')) {
+    const k = part.indexOf(':'); if (k < 0) continue;
+    o[part.slice(0, k).trim().toLowerCase()] = parseFloat(part.slice(k + 1));
+  }
+  if (!isFinite(o['angulo'])) return null;
+  o.ctrl = /\[CONTROL\]/i.test(line);
+  return o;
+}
+function onLine(raw) {
+  const line = raw.replace(/\r/g, '').trim();
+  if (!line) return;
+  S.lastRx = performance.now();
+  const tel = parseTelemetry(line);
+  if (tel) { S.rawTel = line; onTelemetry(tel); if ($('#showTel').checked) log('tel', line); return; }
+  if (/^MPU\s*->/.test(line)) {                       // 2.ª línea de telemetría (lecturas del MPU)
+    S.rawMpu = line; onMpu(parseMpu(line));
+    if ($('#showTel').checked) log('tel', line); return;
+  }
+  log('rx', line);
+  if (/^(>>>|!!!|===)|^Angulo|WHO_AM_I|Calibr|Dispositivo|Escaneando/.test(line)) pushMsg(line);
+  if (/CONTROL ACTIVADO/.test(line)) markCtrl(true);
+  else if (/Control desactivado|Detenido|fuera de rango|Recalibrando|perdio/.test(line)) markCtrl(false);
+}
+// "MPU -> Acel(g) X: a Y: b Z: c | Giro(grados/s) X: d Y: e Z: f | Ang acel: g | Ang filtrado (sin cero): h"
+function parseMpu(line) {
+  const p = line.split('|'), N = '(-?\\d+(?:\\.\\d+)?)';
+  const xyz = seg => { const r = (seg || '').match(new RegExp('X:\\s*' + N + '\\s*Y:\\s*' + N + '\\s*Z:\\s*' + N)); return r ? r.slice(1, 4).map(parseFloat) : null; };
+  const one = seg => { const r = (seg || '').match(new RegExp(':\\s*' + N + '\\s*$')); return r ? parseFloat(r[1]) : null; };
+  const a = xyz(p[0]), g = xyz(p[1]);
+  if (!a || !g) return null;
+  const angAcc = one(p[2]), angFil = one(p[3]);
+  return { ax: a[0], ay: a[1], az: a[2], gx: g[0], gy: g[1], gz: g[2], angAcc: angAcc ?? angFil ?? 0, angFil: angFil ?? angAcc ?? 0 };
+}
+function onMpu(o) {
+  if (!o || !S.last) return;                          // el ángulo medido llega en la línea anterior
+  const m = Object.assign(o, { t: (performance.now() - S.t0) / 1000, angMed: S.last.ang });
+  S.mpu = m; S.mpuSamples.push(m);
+  if (S.mpuSamples.length > 20000) S.mpuSamples.splice(0, 4000);
+}
+const val = (o, k) => (k in o && isFinite(o[k])) ? o[k] : null;
+function onTelemetry(o) {
+  const ang = o['angulo'], err = val(o, 'error') ?? (0 - ang);
+  const s = {
+    t: (performance.now() - S.t0) / 1000, ang, err, sp: ang + err, d: val(o, 'de/dt') ?? 0, u: val(o, 'u') ?? 0, i: val(o, 'i') ?? 0,
+    pwm: val(o, 'pwm') ?? 0, ts: val(o, 'ts real') ?? 0, ctrl: o.ctrl, kp: val(o, 'kp'), kd: val(o, 'kd'), ki: val(o, 'ki'), tol: val(o, 'tol')
+  };
+  s.pwmS = s.ctrl ? Math.sign(s.u) * s.pwm : 0;
+  S.samples.push(s); if (S.samples.length > 40000) S.samples.splice(0, 8000);
+  S.esp = { kp: s.kp, kd: s.kd, ki: s.ki, tol: s.tol };
+  markCtrl(s.ctrl);
+  S.hzBuf.push(performance.now());
+  // historial
+  if ($('#recOn').checked && (!$('#recCtrl').checked || s.ctrl) && s.kp != null && s.kd != null) {
+    const n0 = H.runs.length, r = H.add(s);
+    S.curRun = r; S.recSamples++;
+    if (H.runs.length !== n0) { histDirty = true; }
+  }
+  S.last = s; S.newSample = true; S.dirtyCharts = true;
+}
+function markCtrl(on) { S.ctrl = on; }
+
+/* =====================================================================
+   Consola y mensajes
+   ===================================================================== */
+function log(kind, text) {
+  const el = $('#log'); const near = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  const d = document.createElement('div'); d.className = kind;
+  const t = new Date().toLocaleTimeString('es', { hour12: false });
+  d.textContent = t + '  ' + text; el.appendChild(d);
+  while (el.childNodes.length > 600) el.removeChild(el.firstChild);
+  if (near) el.scrollTop = el.scrollHeight;
+}
+function pushMsg(text) {
+  const box = $('#msgs'); if (box.firstChild && box.firstChild.classList.contains('muted')) box.innerHTML = '';
+  const d = document.createElement('div'); d.textContent = text;
+  d.className = text.startsWith('!!!') ? 'w' : text.startsWith('>>>') ? 'i' : '';
+  box.prepend(d); while (box.childNodes.length > 12) box.removeChild(box.lastChild);
+}
+
+/* =====================================================================
+   Parámetros (UI)
+   ===================================================================== */
+const PARAMS = { kp: { step: 0.1 }, kd: { step: 0.1 }, ki: { step: 0.05 }, tol: { step: 0.1 } };
+const pUI = {};
+let liveTimer = null;
+const parseNum = t => parseFloat(String(t).trim().replace(',', '.'));   // acepta 0.5 y 0,5
+function refreshPending(k) {
+  const u = pUI[k], v = parseNum(u.num.value), esp = S.esp[k];
+  const pending = u.dirty && isFinite(v) && (esp == null || Math.abs(v - esp) > 1e-6);
+  u.num.classList.toggle('pend', pending);
+  u.send.classList.toggle('pri', pending);
+  u.send.textContent = pending ? 'Enviar ●' : 'Enviar';
+}
+function initParams() {
+  $$('.param').forEach(el => {
+    const k = el.dataset.k, num = $('input[type=text]', el), rng = $('input[type=range]', el);
+    const u = pUI[k] = { el, num, rng, send: $('.send', el), dirty: false };
+    num.value = k === 'kp' ? '10' : k === 'tol' ? '0.5' : '0'; rng.value = num.value;
+    const syncRange = v => { if (!isFinite(v)) return; if (v > +rng.max) rng.max = Math.ceil(v * 1.5); rng.value = v; };
+    // Editar solo "prepara" el valor; se envía con Enviar / Enter (o en vivo si esa opción está activa)
+    const stage = live => {
+      u.dirty = true; refreshPending(k);
+      if (live && $('#liveSend').checked) { clearTimeout(liveTimer); liveTimer = setTimeout(() => sendParam(k), 120); }
+    };
+    const bump = (dir, fast) => {
+      const v = (parseNum(num.value) || 0) + dir * PARAMS[k].step * (fast ? 10 : 1);
+      num.value = String(+v.toFixed(4)); syncRange(+v.toFixed(4)); stage(true);
+    };
+    num.addEventListener('input', () => { syncRange(parseNum(num.value)); stage(false); });
+    num.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); sendParam(k); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); bump(1, e.shiftKey); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); bump(-1, e.shiftKey); }
+    });
+    rng.addEventListener('input', () => { num.value = String(+(+rng.value).toFixed(4)); stage(true); });
+    $$('.step', el).forEach(b => b.addEventListener('click', e => bump(+b.dataset.d, e.shiftKey)));
+    u.send.addEventListener('click', () => sendParam(k));
+  });
+}
+function sendParam(k) {
+  const u = pUI[k], v = parseNum(u.num.value);
+  if (!isFinite(v)) { toast('Valor no válido', true); return; }
+  if (send(k + String(+v.toFixed(4)))) { u.dirty = false; refreshPending(k); }
+}
+function syncParamsFromEsp() {
+  for (const k of ['kp', 'kd', 'ki', 'tol']) {
+    const v = S.esp[k], u = pUI[k];
+    $('#esp-' + k).textContent = v == null ? '—' : trimN(v);
+    if (v == null) continue;
+    if (!u.dirty && document.activeElement !== u.num) { u.num.value = trimN(v); if (v > +u.rng.max) u.rng.max = Math.ceil(v * 1.5); u.rng.value = v; }
+    refreshPending(k);
+  }
+}
+
+/* =====================================================================
+   Lecturas + visualizador del balancín
+   ===================================================================== */
+const vis = { ang: 0, wheel: 0, ground: 0, last: performance.now() };
+function initViz() {
+  const g = $('#vSpokes'); let h = '';
+  for (let i = 0; i < 10; i++) { const a = i * 36 * Math.PI / 180; h += `<line x1="${(28 * Math.cos(a)).toFixed(1)}" y1="${(28 * Math.sin(a)).toFixed(1)}" x2="${(94 * Math.cos(a)).toFixed(1)}" y2="${(94 * Math.sin(a)).toFixed(1)}" stroke="#3b3b42" stroke-width="7"/>`; }
+  g.innerHTML = h;
+}
+function updateViz(now) {
+  const dt = Math.min(0.1, (now - vis.last) / 1000); vis.last = now;
+  const s = S.last, fresh = s && (now - S.lastRx) < 1500;
+  const target = fresh ? -s.ang * ($('#invVis').checked ? -1 : 1) : 0;   // ángulo + = adelante = izquierda
+  vis.ang += (clamp(target, -80, 80) - vis.ang) * Math.min(1, dt * 16);
+  const sp = fresh && S.ctrl ? clamp(s.pwmS / 255, -1, 1) : 0;
+  vis.wheel += sp * 540 * dt; vis.ground += sp * 135 * (540 * Math.PI / 180) * dt;   // u<0 = ruedas hacia adelante (izquierda)
+  $('#vBody').setAttribute('transform', `rotate(${vis.ang.toFixed(2)})`);
+  $('#vWheel').setAttribute('transform', `rotate(${(vis.wheel % 360).toFixed(1)})`);
+  $('#vGround').setAttribute('stroke-dashoffset', (vis.ground % 52).toFixed(1));
+  const a = vis.ang * Math.PI / 180, R = 200;
+  const tiltEl = $('#vTilt');
+  tiltEl.setAttribute('x2', (380 * Math.sin(a)).toFixed(1)); tiltEl.setAttribute('y2', (-380 * Math.cos(a)).toFixed(1));
+  const danger = Math.abs(vis.ang) > CUT * 0.8;
+  tiltEl.setAttribute('stroke', danger ? '#ff4d4d' : '#ff7a00'); $('#vArc').setAttribute('stroke', danger ? '#ff4d4d' : '#ff7a00'); $('#vTxt').setAttribute('fill', danger ? '#ff4d4d' : '#ff7a00');
+  $('#vArc').setAttribute('d', Math.abs(a) < 0.01 ? '' : `M 0 ${-R} A ${R} ${R} 0 0 ${a > 0 ? 1 : 0} ${(R * Math.sin(a)).toFixed(1)} ${(-R * Math.cos(a)).toFixed(1)}`);
+  $('#vTxt').textContent = fresh ? (s.ang >= 0 ? '+' : '') + s.ang.toFixed(1) + '°' : '— sin datos —';
+  // barra motores
+  const mb = $('#mbar'), f = sp;
+  mb.style.left = f >= 0 ? '50%' : (50 + f * 50) + '%'; mb.style.width = Math.abs(f) * 50 + '%';
+  $('#motorDir').textContent = !fresh ? 'Motores: —' : !S.ctrl ? 'Motores: detenidos (control OFF)' : s.pwm === 0 ? 'Motores: detenidos' : s.u < 0 ? `Motores: ◀ ADELANTE ${s.pwm}` : `Motores: REVERSA ▶ ${s.pwm}`;
+}
+function updateReads() {
+  const s = S.last; if (!s) return;
+  $('#rAng').textContent = fmtN(s.ang); $('#rErr').textContent = fmtN(s.err); $('#rD').textContent = fmtN(s.d, 1);
+  $('#rU').textContent = fmtN(s.u, 1); $('#rI').textContent = fmtN(s.i, 1); $('#rPwm').textContent = s.ctrl ? s.pwm : 0; $('#rTs').textContent = s.ts; $('#rSp').textContent = fmtN(s.sp, 1);
+  $('#rN').textContent = S.samples.length;
+}
+function updateStatus() {
+  const now = performance.now();
+  S.hzBuf = S.hzBuf.filter(t => now - t < 2000);
+  $('#rHz').textContent = S.hzBuf.length ? (S.hzBuf.length / 2).toFixed(1) : '—';
+  const b = $('#ctrlBadge'), alive = S.conn && (now - S.lastRx) < 1500;
+  if (!S.conn) { b.className = 'badge'; b.textContent = 'SIN CONEXIÓN'; }
+  else if (!alive) { b.className = 'badge nodata'; b.textContent = 'SIN DATOS'; }
+  else if (S.ctrl) { b.className = 'badge on'; b.textContent = 'CONTROL ON'; }
+  else { b.className = 'badge'; b.textContent = 'CONTROL OFF'; }
+  $('#btnToggle').textContent = S.ctrl ? 'Desactivar control' : 'Activar control';
+  $('#btnToggle').classList.toggle('pri', !S.ctrl);
+  const r = S.curRun;
+  $('#curRun').innerHTML = r ? `<span class="tag kp">Kp ${trimN(r.kp)}</span><span class="tag kd">Kd ${trimN(r.kd)}</span>${r.ki != null ? `<span class="tag ki">Ki ${trimN(r.ki)}</span>` : ''}${r.tol != null ? `<span class="tag">Tol ±${trimN(r.tol)}°</span>` : ''}` : '<span class="muted">—</span>';
+  $('#curRunN').textContent = r ? `${r.t.length} muestras guardadas` : (S.last && S.last.kp != null ? 'Esperando muestras según opciones…' : '');
+}
+
+/* =====================================================================
+   Gráficas en vivo
+   ===================================================================== */
+let liveCharts;
+function initLiveCharts() {
+  const neg = v => (v === 0 ? '0' : v.toFixed(Math.abs(v) < 10 && v % 1 ? 1 : 0) + 's');
+  liveCharts = {
+    ang: new Chart($('#cAng'), { minSpan: 6, xFmt: neg }), err: new Chart($('#cErr'), { minSpan: 6, xFmt: neg }),
+    d: new Chart($('#cD'), { minSpan: 40, xFmt: neg }), u: new Chart($('#cU'), { minSpan: 60, xFmt: neg })
+  };
+}
+function drawLive() {
+  const win = +$('#win').value, now = S.paused ? S.pausedAt : (performance.now() - S.t0) / 1000;
+  const a = S.samples, i0 = binSearchT(a, now - win);
+  const w = a.slice(i0).filter(s => s.t <= now + 0.001);
+  const X = w.map(s => s.t - now), col = (k) => w.map(s => s[k]);
+  const xr = [-win, 0];
+  const tolOn = w.some(s => s.tol);
+  liveCharts.ang.set([...(tolOn ? [{ name: 'Banda ±tol', x: X, y: w.map(s => s.sp + (s.tol || 0)), color: '#3b82f6', width: 1, dash: [2, 4] }, { x: X, y: w.map(s => s.sp - (s.tol || 0)), color: '#3b82f6', width: 1, dash: [2, 4] }] : []), { name: 'Setpoint', x: X, y: col('sp'), color: '#6f6f78', width: 1.2, dash: [5, 5] }, { name: 'Ángulo', x: X, y: col('ang'), color: '#ff7a00', width: 2 }], xr);
+  liveCharts.err.set([{ name: 'Error', x: X, y: col('err'), color: 'ink' }], xr);
+  liveCharts.d.set([{ name: 'de/dt', x: X, y: col('d'), color: 'amber' }], xr);
+  liveCharts.u.set([{ name: 'u', x: X, y: col('u'), color: '#ff7a00', width: 2 }, { name: 'PWM (con signo)', x: X, y: col('pwmS'), color: 'ink', width: 1.3 }], xr);
+}
+function binSearchT(a, t) { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m].t < t) lo = m + 1; else hi = m; } return lo; }
+
+/* =====================================================================
+   Historial (UI)
+   ===================================================================== */
+let histDirty = true, histCharts;
+function initHist() {
+  histCharts = {
+    ang: new Chart($('#hAng'), { minSpan: 6 }), err: new Chart($('#hErr'), { minSpan: 6 }), u: new Chart($('#hU'), { minSpan: 60 })
+  };
+  const rl = $('#runList');
+  rl.addEventListener('click', e => {
+    const card = e.target.closest('.run'); if (!card) return;
+    const id = +card.dataset.id;
+    if (e.target.matches('input[type=checkbox]')) { e.target.checked ? H.sel.add(id) : H.sel.delete(id); }
+    else H.focus = id;
+    histDirty = true; renderHist();
+  });
+  ['fKp', 'fKd', 'fKi', 'fTol'].forEach(i => $('#' + i).addEventListener('input', () => { histDirty = true; renderHist(); }));
+  $('#selAll').onclick = () => { H.runs.forEach(r => H.sel.add(r.id)); histDirty = true; renderHist(); };
+  $('#selNone').onclick = () => { H.sel.clear(); histDirty = true; renderHist(); };
+  const selRuns = () => H.runs.filter(r => H.sel.has(r.id));
+  $('#xlsSel').onclick = () => exportXlsx(selRuns(), `balancin_pid_${stamp()}.xlsx`);
+  $('#xlsAll').onclick = () => exportXlsx(H.runs, `balancin_pid_todas_${stamp()}.xlsx`);
+  $('#csvSel').onclick = () => exportCsv(selRuns(), `balancin_pid_${stamp()}.csv`);
+  $('#delSel').onclick = () => { const ids = [...H.sel]; if (!ids.length) return; if (confirm(`¿Eliminar ${ids.length} corrida(s) seleccionada(s)?`)) { H.remove(ids); histDirty = true; renderHist(); updateHistCount(); } };
+  $('#delAll').onclick = () => { if (H.runs.length && confirm('¿Borrar TODO el historial? Esta acción no se puede deshacer.')) { H.remove(H.runs.map(r => r.id)); S.curRun = null; histDirty = true; renderHist(); updateHistCount(); } };
+  $('#runNote').addEventListener('input', e => { const r = H.runs.find(x => x.id === H.focus); if (r) { r.note = e.target.value; H.dirty = true; } });
+}
+function updateHistCount() { $('#histCount').textContent = H.runs.length ? `(${H.runs.length})` : ''; }
+function matchFilter(v, f) { f = f.trim().replace(',', '.'); if (!f) return true; if (v == null) return false; const n = parseFloat(f); return isFinite(n) ? Math.abs(v - n) < 1e-6 : true; }
+function renderHist() {
+  if (!histDirty) return; histDirty = false;
+  const fk = { kp: $('#fKp').value, kd: $('#fKd').value, ki: $('#fKi').value, tol: $('#fTol').value };
+  const rs = H.runs.slice().reverse().filter(r => matchFilter(r.kp, fk.kp) && matchFilter(r.kd, fk.kd) && matchFilter(r.ki, fk.ki) && matchFilter(r.tol, fk.tol));
+  const selOrder = H.runs.filter(r => H.sel.has(r.id));
+  const colorOf = r => PALETTE[selOrder.indexOf(r) % PALETTE.length];
+  $('#runList').innerHTML = rs.length ? rs.map(r => {
+    const st = runStats(r), on = H.sel.has(r.id);
+    return `<div class="run ${H.focus === r.id ? 'focus' : ''}" data-id="${r.id}">
+      <span class="sw" style="background:${on ? rc(colorOf(r)) : TH.off}"></span>
+      <input type="checkbox" ${on ? 'checked' : ''}>
+      <div><div class="tags"><span class="tag kp">Kp ${trimN(r.kp)}</span><span class="tag kd">Kd ${trimN(r.kd)}</span>${r.ki != null ? `<span class="tag ki">Ki ${trimN(r.ki)}</span>` : ''}${r.tol != null ? `<span class="tag">Tol ±${trimN(r.tol)}°</span>` : ''}</div>
+      <div class="run-meta">${st.n} muestras · ${fmtDur(st.dur)} · RMSE ${st.rmse.toFixed(2)}°</div>
+      <div class="run-date">${new Date(r.created).toLocaleString('es')}${r.note ? ' · ' + xmlEsc(r.note).slice(0, 30) : ''}</div></div></div>`;
+  }).join('') : `<div class="empty">${H.runs.length ? 'Ninguna corrida coincide con el filtro.' : 'Aún no hay datos. Conecta la ESP (o el simulador), activa el control y cada combinación de Kp / Kd / Ki se guardará aquí.'}</div>`;
+
+  // comparativa
+  const wrap = $('#cmpWrap');
+  if (!selOrder.length) wrap.innerHTML = '<div class="empty">Marca una o más corridas para compararlas.</div>';
+  else wrap.innerHTML = `<table><thead><tr><th>Corrida</th><th>Muestras</th><th>Dur.</th><th>RMSE °</th><th>|e| medio °</th><th>|e| máx °</th><th>σ ángulo °</th><th>% |e|&lt;2°</th><th>|u| medio</th><th>% sat.</th></tr></thead><tbody>` +
+    selOrder.map(r => { const s = runStats(r); return `<tr><td><span class="sw-dot" style="background:${rc(colorOf(r))}"></span>${runName(r)}</td><td>${s.n}</td><td>${fmtDur(s.dur)}</td><td>${s.rmse.toFixed(2)}</td><td>${s.mae.toFixed(2)}</td><td>${s.emax.toFixed(2)}</td><td>${s.std.toFixed(2)}</td><td>${s.band.toFixed(0)}</td><td>${s.uMean.toFixed(1)}</td><td>${s.sat.toFixed(0)}</td></tr>`; }).join('') + '</tbody></table>';
+
+  // gráficas
+  let maxT = 1; const ser = { ang: [], err: [], u: [] };
+  selOrder.forEach(r => {
+    const x = activeTime(r); if (x.length) maxT = Math.max(maxT, x[x.length - 1]);
+    const c = colorOf(r), nm = runShort(r);
+    ser.ang.push({ name: nm, x, y: r.ang, color: c }); ser.err.push({ name: nm, x, y: r.err, color: c }); ser.u.push({ name: nm, x, y: r.u, color: c });
+  });
+  const sf = v => v.toFixed(v < 10 && v % 1 ? 1 : 0) + 's';
+  for (const k of ['ang', 'err', 'u']) { histCharts[k].o.xFmt = sf; histCharts[k].set(ser[k], [0, maxT]); }
+
+  // detalle de la corrida enfocada
+  const fr = H.runs.find(r => r.id === H.focus), det = $('#detail');
+  if (!fr) { det.style.display = 'none'; return; }
+  det.style.display = '';
+  $('#detailTitle').textContent = 'Detalle · ' + runName(fr);
+  if (document.activeElement !== $('#runNote')) $('#runNote').value = fr.note || '';
+  const at = activeTime(fr), n = fr.t.length, from = Math.max(0, n - 200);
+  $('#rawInfo').textContent = `Mostrando las últimas ${n - from} de ${n} filas (el Excel incluye todas).`;
+  let h = '<table><thead><tr><th>#</th><th>t activo (s)</th><th>Ángulo</th><th>Error</th><th>de/dt</th><th>u</th><th>PWM</th><th>Ts</th><th>Ctrl</th></tr></thead><tbody>';
+  for (let i = n - 1; i >= from; i--) h += `<tr><td>${i + 1}</td><td>${at[i].toFixed(2)}</td><td>${fr.ang[i].toFixed(2)}</td><td>${fr.err[i].toFixed(2)}</td><td>${fr.d[i].toFixed(1)}</td><td>${fr.u[i].toFixed(1)}</td><td>${fr.pwm[i]}</td><td>${fr.ts[i]}</td><td>${fr.ctrl[i] ? 'ON' : 'off'}</td></tr>`;
+  $('#rawWrap').innerHTML = h + '</tbody></table>';
+}
+
+/* =====================================================================
+   Pestaña Lectura: todo lo que reporta la ESP32 (control + MPU6050)
+   ===================================================================== */
+let readCharts;
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const GB_ACC = [['ax', 'Eje X', '#ff7a00'], ['ay', 'Eje Y', '#0aa5e0'], ['az', 'Eje Z', '#2fa866']];
+const GB_GYR = [['gx', 'Eje X', '#ff7a00'], ['gy', 'Eje Y (inclina)', '#0aa5e0'], ['gz', 'Eje Z', '#2fa866']];
+const GB_PID = [['P', 'P · Kp·e', '#ff7a00'], ['I', 'I · Ki·∫e', '#0aa5e0'], ['D', 'D · Kd·de/dt', '#2fa866'], ['U', 'u (salida)', '#9a9aa3']];
+function buildGbars(sel, items, unit) {
+  $(sel).innerHTML = items.map(([k, l, c]) =>
+    `<div class="gbar"><div class="gb-head"><em style="color:${c}">${l}</em><b id="v_${k}">—</b><small>${unit}</small></div><div class="gb-track"><i id="b_${k}" style="background:${c}"></i></div></div>`).join('');
+}
+function setBar(k, v, max) {
+  const el = $('#b_' + k), f = clamp((v ?? 0) / max, -1, 1);
+  el.style.left = f >= 0 ? '50%' : (50 + f * 50) + '%'; el.style.width = Math.abs(f) * 50 + '%';
+}
+function setGb(k, v, max, d) { $('#v_' + k).textContent = fmtN(v, d); setBar(k, v, max); }
+
+function buildDial() {                                // esfera: ángulo + = adelante = izquierda (igual que el balancín animado)
+  const P = (a, r) => { const t = a * Math.PI / 180; return [150 + r * Math.sin(t), 160 - r * Math.cos(t)]; };
+  const arc = (a0, a1, r) => { const [x0, y0] = P(a0, r), [x1, y1] = P(a1, r); return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${r} ${r} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`; };
+  let h = `<path d="${arc(-75, 75, 118)}" fill="none" style="stroke:var(--line2)" stroke-width="10"/>`;
+  h += `<path d="${arc(45, 75, 118)}" fill="none" stroke="#ff4d4d" stroke-width="10" opacity=".55"/><path d="${arc(-75, -45, 118)}" fill="none" stroke="#ff4d4d" stroke-width="10" opacity=".55"/>`;
+  h += `<path d="${arc(-3, 3, 118)}" fill="none" stroke="#3ddc84" stroke-width="10" opacity=".8"/>`;
+  for (let a = -75; a <= 75; a += 15) {
+    const [x0, y0] = P(a, 106), [x1, y1] = P(a, 126), [tx, ty] = P(a, 141), v = -a;
+    h += `<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" style="stroke:var(--muted)" stroke-width="1.5"/>`;
+    h += `<text x="${tx.toFixed(1)}" y="${(ty + 4).toFixed(1)}" style="fill:var(--muted)" font-size="11" font-family="ui-monospace,Consolas,monospace" text-anchor="middle">${v > 0 ? '+' : ''}${v}</text>`;
+  }
+  h += `<text x="18" y="196" style="fill:var(--muted)" font-size="11">◀ ADELANTE (+)</text><text x="282" y="196" style="fill:var(--muted)" font-size="11" text-anchor="end">ATRÁS (−) ▶</text>`;
+  $('#dialStatic').innerHTML = h;
+}
+
+function initRead() {
+  buildGbars('#gAcc', GB_ACC, 'g'); buildGbars('#gGyr', GB_GYR, '°/s'); buildGbars('#gPid', GB_PID, '');
+  buildGbars('#gMot', [['pwm', 'PWM con signo', '#ff7a00']], '');
+  buildDial();
+  const neg = v => (v === 0 ? '0' : v.toFixed(Math.abs(v) < 10 && v % 1 ? 1 : 0) + 's');
+  readCharts = {
+    acc: new Chart($('#rcAcc'), { minSpan: 0.5, xFmt: neg }),
+    gyr: new Chart($('#rcGyr'), { minSpan: 20, xFmt: neg }),
+    ang: new Chart($('#rcAng'), { minSpan: 6, xFmt: neg })
+  };
+  $('#rWin').onchange = drawRead;
+}
+function drawRead() {
+  const win = +$('#rWin').value, now = (performance.now() - S.t0) / 1000;
+  const a = S.mpuSamples, w = a.slice(binSearchT(a, now - win));
+  const X = w.map(s => s.t - now), col = k => w.map(s => s[k]), xr = [-win, 0];
+  readCharts.acc.set([{ name: 'Ax', x: X, y: col('ax'), color: '#ff7a00' }, { name: 'Ay', x: X, y: col('ay'), color: '#0aa5e0' }, { name: 'Az', x: X, y: col('az'), color: '#2fa866' }], xr);
+  readCharts.gyr.set([{ name: 'Gx', x: X, y: col('gx'), color: '#ff7a00' }, { name: 'Gy', x: X, y: col('gy'), color: '#0aa5e0' }, { name: 'Gz', x: X, y: col('gz'), color: '#2fa866' }], xr);
+  readCharts.ang.set([{ name: 'Acelerómetro', x: X, y: col('angAcc'), color: '#0aa5e0', width: 1.2 }, { name: 'Filtrado (sin cero)', x: X, y: col('angFil'), color: 'amber', width: 1.8 }, { name: 'Medido (con cero)', x: X, y: col('angMed'), color: '#ff7a00', width: 2 }], xr);
+}
+function describeCmd(c) {
+  const x = c.toLowerCase().trim();
+  if (x === 'm') return 'Activar / desactivar control';
+  if (x === 's') return 'PARAR motores';
+  if (x === 'z') return 'Fijar cero';
+  if (x === 'c') return 'Recalibrar MPU6050';
+  const m = x.match(/^(tol|k[pid]?)\s*=?\s*(-?[\d.,]+)/);
+  if (m) return ({ tol: 'Tolerancia', kp: 'Kp', ki: 'Ki', kd: 'Kd', k: 'Kp' }[m[1]]) + ' = ' + m[2];
+  return 'Comando manual';
+}
+const kvTable = rows => '<table class="kv"><tbody>' + rows.map(([n, v, u]) => `<tr><td>${n}</td><td class="v">${v}</td><td class="u">${u || ''}</td></tr>`).join('') + '</tbody></table>';
+function updateRead() {
+  const now = performance.now(), s = S.last, m = S.mpu, alive = !!S.conn && now - S.lastRx < 1500;
+  $('#rd').classList.toggle('stale', !alive);
+  $('#cConn').textContent = $('#connLabel').textContent;
+  $('#cHz').textContent = $('#rHz').textContent;
+  $('#cAge').textContent = S.lastRx ? ((now - S.lastRx) / 1000).toFixed(1) + ' s' : '—';
+  $('#cCtl').textContent = $('#ctrlBadge').textContent;
+  $('#cMot').textContent = $('#motorDir').textContent.replace('Motores: ', '');
+
+  // inclinación
+  const ang = s ? s.ang : null, danger = ang != null && Math.abs(ang) > CUT * 0.8;
+  const col = danger ? '#ff4d4d' : '#ff7a00';
+  $('#dNeedle').setAttribute('transform', `rotate(${clamp(-(ang ?? 0), -80, 80).toFixed(1)} 150 160)`);
+  $('#dNeedle').setAttribute('stroke', col); $('#dTxt').setAttribute('fill', col);
+  $('#dTxt').textContent = ang == null ? '—' : (ang >= 0 ? '+' : '') + ang.toFixed(1) + '°';
+  $('#aMed').textContent = fmtN(ang);
+  $('#aFil').textContent = m ? fmtN(m.angFil) : '—';
+  $('#aAcc').textContent = m ? fmtN(m.angAcc) : '—';
+  const dif = m ? m.angAcc - m.angFil : null, difEl = $('#aDif');
+  difEl.textContent = dif == null ? '—' : (dif >= 0 ? '+' : '') + dif.toFixed(2);
+  difEl.className = dif == null ? '' : Math.abs(dif) > 10 ? 'badc' : Math.abs(dif) > 5 ? 'warnc' : 'good';
+
+  // MPU
+  setGb('ax', m?.ax, 1.5, 3); setGb('ay', m?.ay, 1.5, 3); setGb('az', m?.az, 1.5, 3);
+  setGb('gx', m?.gx, 250, 1); setGb('gy', m?.gy, 250, 1); setGb('gz', m?.gz, 250, 1);
+  $('#aMod').textContent = m ? Math.hypot(m.ax, m.ay, m.az).toFixed(3) : '—';
+
+  // PID: aporte de cada término
+  if (s) {
+    const tol = s.tol ?? 0, eC = Math.abs(s.err) <= tol ? 0 : s.err;
+    setGb('P', (s.kp ?? 0) * eC, 255, 1); setGb('I', s.i, 255, 1); setGb('D', (s.kd ?? 0) * s.d, 255, 1); setGb('U', s.u, 255, 1);
+    $('#pErr').textContent = fmtN(s.err); $('#pD').textContent = fmtN(s.d, 1); $('#pTol').textContent = s.tol != null ? '±' + trimN(s.tol) : '—';
+    // motores y tiempos
+    const sp = s.ctrl ? s.pwmS : 0;
+    setGb('pwm', sp, 255, 0);
+    $('#mPwm').textContent = s.ctrl ? s.pwm : 0;
+    const tsEl = $('#mTs'); tsEl.textContent = s.ts;
+    tsEl.className = s.ts >= 8 && s.ts <= 12 ? 'good' : s.ts <= 20 ? 'warnc' : 'badc';
+    let mx = 0; for (let i = S.samples.length - 1; i >= 0 && S.samples[i].t > s.t - 5; i--) mx = Math.max(mx, S.samples[i].ts);
+    const mxEl = $('#mTsMax'); mxEl.textContent = mx; mxEl.className = mx <= 12 ? 'good' : mx <= 20 ? 'warnc' : 'badc';
+    $('#mDir').textContent = $('#motorDir').textContent;
+    $('#qKp').textContent = trimN(s.kp); $('#qKi').textContent = trimN(s.ki); $('#qKd').textContent = trimN(s.kd); $('#qTol').textContent = trimN(s.tol);
+    $('#kv1').innerHTML = kvTable([
+      ['Angulo', fmtN(s.ang), '°'], ['Error', fmtN(s.err), '°'], ['de/dt', fmtN(s.d, 1), '°/s'], ['Kp', trimN(s.kp)], ['Ki', trimN(s.ki)], ['Kd', trimN(s.kd)],
+      ['I (aporte integral)', fmtN(s.i, 1)], ['Tol', trimN(s.tol), '°'], ['u', fmtN(s.u, 2)], ['PWM', s.pwm], ['Ts real', s.ts, 'ms'], ['Control', s.ctrl ? 'ON' : 'off']]);
+  }
+  if (m) {
+    $('#kv2').innerHTML = kvTable([
+      ['Acel X', m.ax.toFixed(3), 'g'], ['Acel Y', m.ay.toFixed(3), 'g'], ['Acel Z', m.az.toFixed(3), 'g'],
+      ['Giro X', m.gx.toFixed(1), '°/s'], ['Giro Y', m.gy.toFixed(1), '°/s'], ['Giro Z', m.gz.toFixed(1), '°/s'],
+      ['Ang acel', m.angAcc.toFixed(2), '°'], ['Ang filtrado (sin cero)', m.angFil.toFixed(2), '°']]);
+  }
+  $('#raw1').textContent = S.rawTel || '—'; $('#raw2').textContent = S.rawMpu || '—';
+
+  // enviado / mensajes
+  const tl = S.txLog;
+  $('#txList').innerHTML = tl.length ? tl.map(x => `<div><span>${new Date(x.t).toLocaleTimeString('es', { hour12: false })}</span><b>${esc(x.cmd)}</b><span>${describeCmd(x.cmd)}</span></div>`).join('') : '<div class="muted">Nada enviado todavía</div>';
+  $('#rMsgs').innerHTML = $('#msgs').innerHTML;
+}
+
+/* =====================================================================
+   Init
+   ===================================================================== */
+let curTab = 'live';
+function setTab(t) {
+  curTab = t;
+  $$('.tab').forEach(e => e.classList.toggle('on', e.id === 'tab-' + t));
+  $$('.tab-btn').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  if (t === 'hist') { histDirty = true; renderHist(); setTimeout(() => Object.values(histCharts).forEach(c => c.resize()), 0); }
+  if (t === 'live') setTimeout(() => Object.values(liveCharts).forEach(c => c.resize()), 0);
+  if (t === 'read') setTimeout(() => { Object.values(readCharts).forEach(c => c.resize()); updateRead(); drawRead(); }, 0);
+  if (t === 'cons') { const l = $('#log'); l.scrollTop = l.scrollHeight; }
+}
+function emergencyStop() { if (send('s')) { toast('Comando PARAR enviado'); } }
+
+function init() {
+  H.load(); initParams(); initViz(); initLiveCharts(); initHist(); initRead(); updateHistCount();
+  if (!('serial' in navigator)) {
+    const b = $('#banner'); b.style.display = 'block';
+    b.innerHTML = 'Este navegador no soporta <b>Web Serial</b> (conexión USB). La conexión por <b>WiFi</b> y el simulador funcionan en cualquier navegador.';
+  }
+  if (location.protocol === 'https:') {
+    const b = $('#banner'); b.style.display = 'block';
+    b.innerHTML = 'Esta página se abrió por <b>https</b>: el navegador bloqueará la conexión WiFi (ws://) a la ESP32. Abre el archivo <b>balancin_pid.html</b> directamente desde tu PC.';
+  }
+  $$('.tab-btn').forEach(b => b.onclick = () => setTab(b.dataset.tab));
+  const themeLabel = () => $('#btnTheme').textContent = document.documentElement.dataset.theme === 'light' ? '☾ Oscuro' : '☀ Claro';
+  themeLabel();
+  $('#btnTheme').onclick = () => {
+    const light = document.documentElement.dataset.theme !== 'light';
+    if (light) document.documentElement.dataset.theme = 'light'; else delete document.documentElement.dataset.theme;
+    try { localStorage.setItem('balancin_theme', light ? 'light' : 'dark'); } catch (e) { }
+    readTheme(); themeLabel();
+    Object.values(liveCharts).concat(Object.values(histCharts), Object.values(readCharts)).forEach(c => c.draw());
+    buildDial();
+    histDirty = true; renderHist();
+  };
+  try { const h = localStorage.getItem('balancin_ws_host'); if (h) $('#wsHost').value = h; } catch (e) { }
+  $('#wsHost').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btnWifi').click(); });
+  $('#btnWifi').onclick = () => S.mode === 'ws' ? disconnect() : connectWS();
+  $('#btnConnect').onclick = () => S.mode === 'serial' ? disconnect() : connectSerial();
+  $('#btnSim').onclick = () => S.mode === 'sim' ? disconnect() : startSim();
+  $('#btnKick').onclick = () => S.conn && S.conn.kick && S.conn.kick();
+  $('#btnToggle').onclick = () => {
+    if (!S.conn) return toast('No hay conexión con la ESP', true);
+    send('m');
+  };
+  $('#btnZero').onclick = () => send('z');
+  $('#btnCal').onclick = () => send('c');
+  $('#btnStop').onclick = emergencyStop;
+  $('#btnPause').onclick = () => {
+    S.paused = !S.paused; S.pausedAt = (performance.now() - S.t0) / 1000;
+    $('#btnPause').textContent = S.paused ? 'Reanudar gráficas' : 'Pausar gráficas'; S.dirtyCharts = true;
+  };
+  $('#btnClearLive').onclick = () => { S.samples.length = 0; S.dirtyCharts = true; };
+  $('#win').onchange = () => S.dirtyCharts = true;
+  $('#rawSend').onclick = () => { const i = $('#rawCmd'); if (i.value.trim()) { send(i.value.trim()); i.value = ''; } };
+  $('#rawCmd').addEventListener('keydown', e => { if (e.key === 'Enter') $('#rawSend').click(); });
+  $('#logClear').onclick = () => $('#log').innerHTML = '';
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape') emergencyStop();
+    else if (e.key === ' ' && !/INPUT|TEXTAREA|SELECT|BUTTON/.test(document.activeElement.tagName)) { e.preventDefault(); emergencyStop(); }
+  });
+  window.addEventListener('beforeunload', () => H.save());
+  if ('serial' in navigator) navigator.serial.addEventListener('disconnect', () => { if (S.mode === 'serial') { toast('La ESP32 se desconectó', true); disconnect(); } });
+  log('info', 'Listo. Conecta la ESP32 o prueba el simulador.');
+
+  let lastDraw = 0, lastSlow = 0, lastRead = 0;
+  (function frame(now) {
+    updateViz(now);
+    if (curTab === 'read' && now - lastRead > 150) { lastRead = now; updateRead(); drawRead(); }
+    if (S.newSample) { S.newSample = false; updateReads(); syncParamsFromEsp(); }
+    if ((S.dirtyCharts || (!S.paused && now - lastDraw > 100)) && curTab === 'live' && now - lastDraw > 33) { drawLive(); lastDraw = now; S.dirtyCharts = false; }
+    if (now - lastSlow > 500) {
+      lastSlow = now; updateStatus(); updateHistCount();
+      if (curTab === 'hist' && S.curRun && S.mode) { histDirty = true; renderHist(); }
+    }
+    requestAnimationFrame(frame);
+  })(performance.now());
+  setInterval(() => H.save(), 5000);
+}
+init();
+</script>
+</body>
+</html>
