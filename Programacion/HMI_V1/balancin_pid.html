@@ -99,6 +99,15 @@ input[type=range]{accent-color:var(--orange);width:100%}
 .p-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
 .p-name{font-weight:800;font-size:16px;color:var(--orange)}
 .p-esp{font-size:12px;color:var(--muted)}
+.pgroup{margin:14px 0 8px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:4px}
+.pgroup:first-of-type{margin-top:4px}
+.ptabs{display:flex;gap:6px;margin:2px 0 12px}
+.ptab{flex:1;padding:8px 6px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--muted);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.ptab:hover{color:var(--text)}
+.ptab.on{background:var(--orange);border-color:var(--orange);color:#111}
+.ptab.pend::after{content:" ●";font-size:10px}
+.ppane{display:none}
+.ppane.on{display:block}
 .p-esp b{font-family:var(--mono);color:var(--text)}
 .p-row{display:flex;gap:6px;margin-bottom:6px}
 .p-row input[type=text]{flex:1;min-width:0;font-family:var(--mono);font-size:15px;text-align:center}
@@ -266,6 +275,12 @@ pre.rawline{margin:8px 0 0;padding:8px 10px;background:var(--logbg);border:1px s
       <label class="opt"><input type="checkbox" id="liveSend"> Enviar al instante con deslizador y ± (si no, usa Enviar)</label>
 
       <div class="hint" style="margin:-2px 0 10px">Escribe con punto o coma (0.5 / 0,5). Se envía con <b>Enviar</b> o <kbd>Enter</kbd>. Flechas ↑↓ y ± cambian 0.1 (con <kbd>Shift</kbd>, 1.0).</div>
+      <div class="ptabs" role="tablist">
+        <button class="ptab on" data-pane="ang" role="tab">Ángulo</button>
+        <button class="ptab" data-pane="m1" role="tab">Motor 1</button>
+        <button class="ptab" data-pane="m2" role="tab">Motor 2</button>
+      </div>
+      <div class="ppane on" data-pane="ang">
       <div class="param" data-k="kp">
         <div class="p-head"><span class="p-name">Kp</span><span class="p-esp">ESP: <b id="esp-kp">—</b></span></div>
         <div class="p-row"><button class="step" data-d="-1">−</button><input type="text" inputmode="decimal" autocomplete="off" spellcheck="false"><button class="step" data-d="1">+</button><button class="btn sm send">Enviar</button></div>
@@ -287,6 +302,8 @@ pre.rawline{margin:8px 0 0;padding:8px 10px;background:var(--logbg);border:1px s
         <input type="range" min="0" max="5" step="0.05">
         <div class="hint" style="margin-top:6px">Si |error| ≤ tolerancia, P e I ven error 0 (comando <kbd>tol0.5</kbd>; <kbd>tol0</kbd> la desactiva). Cada tolerancia se guarda como corrida aparte en el historial.</div>
       </div>
+      </div>
+      <div id="pidMotores"></div>
     </div>
 
     <div class="card">
@@ -476,7 +493,7 @@ pre.rawline{margin:8px 0 0;padding:8px 10px;background:var(--logbg);border:1px s
         <div class="nm"><span>Tolerancia</span><b id="qTol">—</b><small>°</small></div>
       </div>
       <h3 style="margin-top:16px">Encoders</h3>
-      <div class="na"><b>Sin datos.</b> El firmware actual (<code>PID_Paso5_PID.ino</code>) no tiene encoders: solo lee el MPU6050 y manda PWM a los motores. Cuando agregues los encoders y la ESP imprima sus lecturas, aquí se muestran las RPM / pulsos.</div>
+      <div class="na"><b>Sin gráfica aquí.</b> El firmware (<code>Balacin_V1</code>) ya lee los encoders: las cuentas y las rpm de cada rueda llegan en la línea <code>Enc -&gt;</code> de la telemetría, que se ve en la pestaña Consola con <b>Mostrar telemetría</b> activado. Esta tarjeta todavía no las grafica.</div>
     </div>
   </div>
 
@@ -592,7 +609,7 @@ const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const fmtN = (v, d = 2) => (v == null || !isFinite(v)) ? '—' : (+v).toFixed(d);
-const trimN = v => v == null ? '—' : String(+(+v).toFixed(4));
+const trimN = v => v == null ? '—' : String(+(+v).toFixed(6));
 const CUT = 45;                       // CORTE_GRADOS del firmware
 const PALETTE = ['#ff7a00', 'ink', '#0aa5e0', '#d4a500', '#2fa866', '#e0306f', '#8a63d2', '#b5651d'];
 let TH = {};
@@ -1124,6 +1141,12 @@ function onLine(raw) {
     S.rawMpu = line; onMpu(parseMpu(line));
     if ($('#showTel').checked) log('tel', line); return;
   }
+  if (/^Enc\s*->/.test(line)) {                      // 3.ª línea: encoders y PID de velocidad de cada motor
+    const g = (n) => { const r = line.match(new RegExp('M' + n + '\\s+Kp:\\s*(-?[\\d.]+)\\s+Ki:\\s*(-?[\\d.]+)\\s+Kd:\\s*(-?[\\d.]+)')); return r ? r.slice(1, 4).map(parseFloat) : null; };
+    for (const n of [1, 2]) { const v = g(n); if (v) { S.esp['v' + n + 'p'] = v[0]; S.esp['v' + n + 'i'] = v[1]; S.esp['v' + n + 'd'] = v[2]; } }
+    S.rawEnc = line;
+    if ($('#showTel').checked) log('tel', line); return;
+  }
   log('rx', line);
   if (/^(>>>|!!!|===)|^Angulo|WHO_AM_I|Calibr|Dispositivo|Escaneando/.test(line)) pushMsg(line);
   if (/CONTROL ACTIVADO/.test(line)) markCtrl(true);
@@ -1188,7 +1211,53 @@ function pushMsg(text) {
 /* =====================================================================
    Parámetros (UI)
    ===================================================================== */
+// Los PID de velocidad por motor usan como clave el prefijo del comando de la ESP: v1p, v1i, v1d (motor 1) y v2p, v2i, v2d (motor 2)
 const PARAMS = { kp: { step: 0.1 }, kd: { step: 0.1 }, ki: { step: 0.05 }, tol: { step: 0.1 } };
+const MOTOR_PID = [
+  { m: 1, titulo: 'PID de velocidad · Motor 1 (izquierdo, encoder)' },
+  { m: 2, titulo: 'PID de velocidad · Motor 2 (derecho, encoder)' }
+];
+const MOTOR_GAINS = [
+  { g: 'p', name: 'Kp', step: 0.0001, max: 0.01, rstep: 0.0001 },
+  { g: 'i', name: 'Ki', step: 0.0001, max: 0.01, rstep: 0.0001 },
+  { g: 'd', name: 'Kd', step: 0.00001, max: 0.001, rstep: 0.00001 }
+];
+function buildMotorParams() {
+  let h = '';
+  for (const mp of MOTOR_PID) {
+    h += `<div class="ppane" data-pane="m${mp.m}"><div class="pgroup">${mp.titulo}</div>`;
+    for (const gn of MOTOR_GAINS) {
+      const k = `v${mp.m}${gn.g}`;
+      PARAMS[k] = { step: gn.step };
+      h += `<div class="param" data-k="${k}">
+        <div class="p-head"><span class="p-name">${gn.name} M${mp.m}</span><span class="p-esp">ESP: <b id="esp-${k}">—</b></span></div>
+        <div class="p-row"><button class="step" data-d="-1">−</button><input type="text" inputmode="decimal" autocomplete="off" spellcheck="false"><button class="step" data-d="1">+</button><button class="btn sm send">Enviar</button></div>
+        <input type="range" min="0" max="${gn.max}" step="${gn.rstep}">
+      </div>`;
+    }
+    h += `<div class="hint" style="margin-top:8px">Lazo externo (encoders): su salida es el ángulo objetivo de este motor. Con todo en 0 está apagado. Las rpm se calculan con las cuentas por vuelta de cada rueda (<kbd>CUENTAS_POR_REV_IZQ</kbd> y <kbd>CUENTAS_POR_REV_DER</kbd> en el firmware). Comandos: <kbd>v${mp.m}p</kbd> <kbd>v${mp.m}i</kbd> <kbd>v${mp.m}d</kbd>; <kbd>vp</kbd> <kbd>vi</kbd> <kbd>vd</kbd> cambian los dos motores.</div></div>`;
+  }
+  $('#pidMotores').innerHTML = h;
+}
+// Sub-pestañas de la tarjeta Parámetros PID: Ángulo / Motor 1 / Motor 2
+function showPPane(name) {
+  $$('.ptab').forEach(b => b.classList.toggle('on', b.dataset.pane === name));
+  $$('.ppane').forEach(d => d.classList.toggle('on', d.dataset.pane === name));
+  try { localStorage.setItem('pidPane', name); } catch (e) {}
+}
+function initPTabs() {
+  $$('.ptab').forEach(b => b.addEventListener('click', () => showPPane(b.dataset.pane)));
+  let saved = null;
+  try { saved = localStorage.getItem('pidPane'); } catch (e) {}
+  showPPane(['ang', 'm1', 'm2'].includes(saved) ? saved : 'ang');
+}
+// Marca la pestaña que tiene un valor escrito sin enviar
+function updatePaneDots() {
+  $$('.ptab').forEach(b => {
+    const pane = $('.ppane[data-pane="' + b.dataset.pane + '"]');
+    b.classList.toggle('pend', !!(pane && $('.param .pend', pane)));
+  });
+}
 const pUI = {};
 let liveTimer = null;
 const parseNum = t => parseFloat(String(t).trim().replace(',', '.'));   // acepta 0.5 y 0,5
@@ -1198,8 +1267,11 @@ function refreshPending(k) {
   u.num.classList.toggle('pend', pending);
   u.send.classList.toggle('pri', pending);
   u.send.textContent = pending ? 'Enviar ●' : 'Enviar';
+  updatePaneDots();
 }
 function initParams() {
+  buildMotorParams();
+  initPTabs();
   $$('.param').forEach(el => {
     const k = el.dataset.k, num = $('input[type=text]', el), rng = $('input[type=range]', el);
     const u = pUI[k] = { el, num, rng, send: $('.send', el), dirty: false };
@@ -1212,7 +1284,7 @@ function initParams() {
     };
     const bump = (dir, fast) => {
       const v = (parseNum(num.value) || 0) + dir * PARAMS[k].step * (fast ? 10 : 1);
-      num.value = String(+v.toFixed(4)); syncRange(+v.toFixed(4)); stage(true);
+      num.value = String(+v.toFixed(6)); syncRange(+v.toFixed(6)); stage(true);
     };
     num.addEventListener('input', () => { syncRange(parseNum(num.value)); stage(false); });
     num.addEventListener('keydown', e => {
@@ -1220,7 +1292,7 @@ function initParams() {
       else if (e.key === 'ArrowUp') { e.preventDefault(); bump(1, e.shiftKey); }
       else if (e.key === 'ArrowDown') { e.preventDefault(); bump(-1, e.shiftKey); }
     });
-    rng.addEventListener('input', () => { num.value = String(+(+rng.value).toFixed(4)); stage(true); });
+    rng.addEventListener('input', () => { num.value = String(+(+rng.value).toFixed(6)); stage(true); });
     $$('.step', el).forEach(b => b.addEventListener('click', e => bump(+b.dataset.d, e.shiftKey)));
     u.send.addEventListener('click', () => sendParam(k));
   });
@@ -1228,10 +1300,10 @@ function initParams() {
 function sendParam(k) {
   const u = pUI[k], v = parseNum(u.num.value);
   if (!isFinite(v)) { toast('Valor no válido', true); return; }
-  if (send(k + String(+v.toFixed(4)))) { u.dirty = false; refreshPending(k); }
+  if (send(k + String(+v.toFixed(6)))) { u.dirty = false; refreshPending(k); }
 }
 function syncParamsFromEsp() {
-  for (const k of ['kp', 'kd', 'ki', 'tol']) {
+  for (const k of Object.keys(PARAMS)) {
     const v = S.esp[k], u = pUI[k];
     $('#esp-' + k).textContent = v == null ? '—' : trimN(v);
     if (v == null) continue;
@@ -1451,6 +1523,10 @@ function describeCmd(c) {
   if (x === 's') return 'PARAR motores';
   if (x === 'z') return 'Fijar cero';
   if (x === 'c') return 'Recalibrar MPU6050';
+  const mv = x.match(/^(?:k?v)([12]?)([pid])\s*=?\s*(-?[\d.,]+)/);
+  if (mv) return 'PID velocidad ' + (mv[1] ? 'motor ' + mv[1] : 'ambos motores') + ' · K' + mv[2] + ' = ' + mv[3];
+  if (x === 'e') return 'Encoders a cero';
+  if (x === 'te') return 'Prueba de encoders';
   const m = x.match(/^(tol|k[pid]?)\s*=?\s*(-?[\d.,]+)/);
   if (m) return ({ tol: 'Tolerancia', kp: 'Kp', ki: 'Ki', kd: 'Kd', k: 'Kp' }[m[1]]) + ' = ' + m[2];
   return 'Comando manual';

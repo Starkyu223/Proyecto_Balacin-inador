@@ -1,9 +1,11 @@
-# Conexiones completas — Robot Balancín (v2, corregida)
+# Conexiones completas — Robot Balancín (versión final)
+
+Este documento está alineado con el firmware **`Balacin_V1`**: los pines, el sentido de los encoders y el pulsador son los que usa ese código. Cuando algo del firmware difiere del esquemático (por ejemplo BIN1/BIN2 del motor derecho), se indica en una nota.
 
 Cambios respecto a la v1:
 - El control pasa a una **ESP32-S3-DevKitC-1 con módulo WROOM-1 N16R8** (antes el diseño estaba pensado con la distribución de la DevKitM-1 / MINI-1).
 - Los números de pin de este documento son los del **símbolo U3 del esquemático**, no la posición física en la placa.
-- Se reasignaron los GPIO para acortar pistas y se evitan GPIO48 y GPIO38 (LED RGB según la versión de la placa).
+- Se reasignaron los GPIO para acortar pistas. GPIO48 y GPIO38 **no se conectan en la PCB**: son del LED RGB de la placa (según la versión) y el firmware los usa para el LED de estado.
 - Se agregan headers de pines libres (H4, H8, H5).
 - Reglas de PCB ajustadas para baquelita casera (quemado).
 
@@ -13,7 +15,7 @@ Cambios respecto a la v1:
 
 | MCU | Rol |
 |---|---|
-| ESP32-S3-DevKitC-1 (WROOM-1 N16R8) | Control: motores, encoders, MPU-6050, botón |
+| ESP32-S3-DevKitC-1 (WROOM-1 N16R8) | Control: motores, encoders, MPU-6050, botón y LED RGB de estado |
 | GOOUUU ESP32-S3-CAM V1.5 (OV3660) | Visión artificial y cámara (integrar después) |
 
 ---
@@ -29,7 +31,7 @@ Cambios respecto a la v1:
 
 > El conversor DC/DC no usa GPIO. Solo potencia.
 > Los motores se alimentan de la batería a través de VM del TB6612.
-> Motores de 12V: confirmar que el voltaje de la batería esté dentro del rango del motor y del TB6612 (datasheet).
+> Los motores son de 12 V y en las pruebas trabajan con la batería a **7.5–8 V**, así que tienen menos fuerza y velocidad máxima que a 12 V (el PWM es una fracción de esa tensión).
 
 ---
 
@@ -45,42 +47,56 @@ Pin = número del símbolo U3 en el esquemático.
 | PWMA | GPIO9 | 15 | TB6612 PWMA (motor izquierdo) |
 | AIN2 | GPIO10 | 16 | TB6612 AIN2 |
 | AIN1 | GPIO11 | 17 | TB6612 AIN1 |
-| BIN1 | GPIO12 | 18 | TB6612 BIN1 (motor derecho) |
-| BIN2 | GPIO13 | 19 | TB6612 BIN2 |
+| BIN1 | GPIO12 | 18 | TB6612 BIN1 (motor derecho). Ver la nota de abajo |
+| BIN2 | GPIO13 | 19 | TB6612 BIN2. Ver la nota de abajo |
 | PWMB | GPIO14 | 20 | TB6612 PWMB |
 | CH_A_Izq | GPIO18 | 11 | Encoder motor izquierdo CH_A |
 | CH_B_Izq | GPIO8 | 12 | Encoder motor izquierdo CH_B |
 | CH_A_Der | GPIO41 | 38 | Encoder motor derecho CH_A |
 | CH_B_Der | GPIO39 | 36 | Encoder motor derecho CH_B |
-| Botón Start | GPIO40 | 37 | Botón + pull-down 10kΩ a GND |
+| Botón Start | GPIO40 | 37 | Botón + pull-down 10kΩ a GND (ver la sección del botón) |
 | SDA_MPU | GPIO21 | 27 | MPU-6050 SDA |
 | SCL_MPU | GPIO47 | 28 | MPU-6050 SCL |
 | TXD | GPIO43 | 43 | GOOUUU RX (GPIO44) — cruzado |
 | RXD | GPIO44 | 42 | GOOUUU TX (GPIO43) — cruzado |
+| LED RGB | GPIO48 o GPIO38 | 29 o 35 | LED RGB de la placa (WS2812); no va a la PCB. El firmware escribe en los dos |
+
+> **Nota sobre BIN1 y BIN2.** En el esquemático, GPIO12 va a BIN1 y GPIO13 a BIN2 del TB6612. En el firmware están **intercambiados** (`BIN1 = 13` y `BIN2 = 12`) para que el motor derecho gire en el sentido correcto sin tocar la PCB.
 
 ### Firmware (Arduino IDE)
+
+Así están definidos en `Balacin_V1.ino`:
 
 ```cpp
 // Motor izquierdo (A)
 #define PWMA      9
 #define AIN1      11
 #define AIN2      10
-// Motor derecho (B)
+// Motor derecho (B): BIN1/BIN2 intercambiados respecto al esquemático (ver nota)
 #define PWMB      14
-#define BIN1      12
-#define BIN2      13
-// Encoders
+#define BIN1      13
+#define BIN2      12
+// Encoders: decodificación x4 por interrupción, con pull-up interno
 #define ENC_IZQ_A 18
 #define ENC_IZQ_B 8
 #define ENC_DER_A 41
 #define ENC_DER_B 39
-// MPU-6050 (I2C)
+#define ENC_PULLUP true
+#define ENC_INVERTIR_IZQ false
+#define ENC_INVERTIR_DER true       // el encoder derecho cuenta al revés
+// MPU-6050 (I2C a 400 kHz, dirección 0x68)
 #define SDA_PIN   21
 #define SCL_PIN   47
-// Botón Start
-#define BTN_START 40
-// UART a la GOOUUU: Serial0 (GPIO43 TX / GPIO44 RX)
+// Pulsador de arranque
+#define PIN_PULSADOR 40
+#define PULSADOR_ACTIVO_BAJO true   // true = pulsador entre GPIO40 y GND
+// LED RGB de la placa (WS2812): GPIO48 (placa v1.0) o GPIO38 (placa v1.1)
+#define PIN_LED_RGB_A 48
+#define PIN_LED_RGB_B 38
+// UART a la GOOUUU: Serial0 (GPIO43 TX / GPIO44 RX). Todavía no se usa en el firmware.
 ```
+
+Cuentas por vuelta de cada rueda, medidas a mano (3 vueltas, decodificación x4): **3428** la izquierda y **3342** la derecha.
 
 ### Pines libres, sacados a headers
 
@@ -98,11 +114,11 @@ Pin = número del símbolo U3 en el esquemático.
 | 13 | GPIO3 | Strapping JTAG |
 | 14 | GPIO46 | Strapping |
 | 25, 26 | GPIO19, GPIO20 | USB D−/D+ |
-| 29 | GPIO48 | LED RGB onboard (evitado a propósito) |
+| 29 | GPIO48 | LED RGB de la placa (placa v1.0). No se conecta en la PCB; el firmware lo usa para el LED de estado |
 | 30 | GPIO45 | Strapping VDD_SPI |
 | 31 | GPIO0 | Strapping BOOT |
 | 32, 33, 34 | GPIO35, GPIO36, GPIO37 | PSRAM octal (N16R8) |
-| 35 | GPIO38 | Posible LED RGB según versión (evitado a propósito) |
+| 35 | GPIO38 | LED RGB de la placa (placa v1.1). No se conecta en la PCB; el firmware lo usa para el LED de estado |
 
 Notas:
 - GPIO39, 40, 41 y 42 también son pines JTAG, pero por defecto el S3 depura por USB, así que no afecta salvo que uses JTAG por pines.
@@ -185,8 +201,8 @@ Notas:
 | AIN1 | GPIO11 (U3 pin 17) | Dirección motor izquierdo |
 | AIN2 | GPIO10 (U3 pin 16) | Dirección motor izquierdo |
 | PWMA | GPIO9 (U3 pin 15) | Velocidad motor izquierdo |
-| BIN1 | GPIO12 (U3 pin 18) | Dirección motor derecho |
-| BIN2 | GPIO13 (U3 pin 19) | Dirección motor derecho |
+| BIN1 | GPIO12 (U3 pin 18) | Dirección motor derecho (en el firmware es el pin `BIN2`) |
+| BIN2 | GPIO13 (U3 pin 19) | Dirección motor derecho (en el firmware es el pin `BIN1`) |
 | PWMB | GPIO14 (U3 pin 20) | Velocidad motor derecho |
 | AO1 / AO2 | Motor izquierdo M+ / M− | Potencia |
 | BO1 / BO2 | Motor derecho M+ / M− | Potencia |
@@ -213,7 +229,9 @@ Notas:
 Notas:
 - Corriente de stall **estimada** en ~1 A por motor (fichas de motores de la misma familia 25GA-370 / JGA25). No es dato de este modelo exacto.
 - El encoder se alimenta a 3.3V (rango indicado en motores similares: 3.3 a 5V). **Nunca conectar 12V a los cables del encoder.**
-- No confirmado si las salidas del encoder son de colector abierto. Si las señales salen ruidosas o fijas, usar `INPUT_PULLUP` en esos pines.
+- El firmware activa el pull-up interno (`INPUT_PULLUP`) en los cuatro pines de los encoders; sirve tanto si las salidas son de colector abierto como si no.
+- Sentido de los encoders: con el comando `te` se comprobó que cada uno cuenta positivo cuando el motor gira en el sentido de la orden positiva. El derecho necesitó invertirse (`ENC_INVERTIR_DER`).
+- Los motores trabajan a 7.5–8 V (ver redes de alimentación).
 
 ---
 
@@ -227,6 +245,8 @@ Notas:
 | SCL | GPIO47 (U3 pin 28) | |
 | AD0 | GND | Dirección I2C = 0x68 |
 | INT, XDA, XCL | Sin conectar | INT opcional (usar GPIO1 o GPIO2 de H5 si se necesita) |
+
+El firmware usa el bus I2C a **400 kHz** (se puede bajar con el comando `i2c100` si hay errores de lectura) y escanea el bus al arrancar: debe aparecer un dispositivo en `0x68`.
 
 Pull-ups: si usas módulo GY-521 ya trae pull-ups y capacitor. No los dupliques. Si usas el chip suelto: C3 = 100nF en VCC, R2 y R3 = 4.7kΩ a 3.3V en SDA y SCL.
 
@@ -242,7 +262,17 @@ Pull-ups: si usas módulo GY-521 ya trae pull-ups y capacitor. No los dupliques.
                GND
 ```
 
-GPIO40 lee `0` en reposo y `1` al presionar.
+Con este circuito de la PCB, GPIO40 lee `0` en reposo y `1` al presionar (**activo en alto**).
+
+**Cómo lo lee el firmware.** `PULSADOR_ACTIVO_BAJO` está en `true`: el firmware activa el pull-up interno y considera "presionado" el nivel bajo, es decir, espera un pulsador conectado **entre GPIO40 y GND**. Si se usa el botón de la PCB (3.3 V al GPIO40), hay que poner `PULSADOR_ACTIVO_BAJO` en `false`.
+
+**Qué hace el pulsador.** Lleva el arranque en orden con tres pulsaciones: `c` (recalibrar), `z` (fijar cero) y `m` (activar el control); con el control activo, una pulsación lo para. El LED RGB indica el paso (azul, amarillo, verde y morado). El detalle está en la guía `Balacin_V1_guia.md`.
+
+---
+
+## LED RGB de la placa
+
+La DevKitC-1 trae un LED RGB tipo WS2812, en el GPIO48 (placa v1.0) o en el GPIO38 (placa v1.1). No se conecta a la PCB; el firmware escribe en los dos pines con `neopixelWrite`. Colores: azul (encendido), apagado (calibrando o fijando el cero), amarillo (calibrado), verde (cero fijado), morado (control activo) y rojo (error: el MPU-6050 no responde). La placa también tiene un LED rojo fijo de alimentación, que no es este.
 
 ---
 
@@ -296,10 +326,17 @@ Corrientes aproximadas por ancho (estimadas, IPC-2221, cobre 1 oz, +10 °C): 0.6
 
 ---
 
-## Pendiente de verificar (no depende del esquemático)
+## Cómo se comprueba el conexionado
 
-1. Que el footprint de U3 mapee cada número del símbolo al pin físico correcto de la DevKitC-1 (comparar con el pinout oficial) y el ancho entre las dos filas de headers (medir en la placa real).
-2. Cómo está protegida la entrada de 5V de la DevKitC-1 si se conecta el DC/DC y el USB a la vez.
-3. Voltaje de la batería frente a los motores de 12V y el TB6612.
-4. Si las salidas del encoder necesitan pull-up.
-5. Comprobar en protoboard: escaneo I2C (MPU en 0x68), lectura de ambos encoders, PWM y dirección de cada motor, y el botón, antes de fabricar.
+Estas comprobaciones las hace el propio firmware:
+
+1. **MPU-6050:** al arrancar escanea el bus I2C y debe aparecer `0x68` en el Monitor Serial.
+2. **Encoders y motores:** el comando `te` mueve cada motor 1 s con las ruedas en el aire y muestra las cuentas; las dos deben salir positivas.
+3. **Pulsador y LED:** la secuencia de tres pulsaciones prueba el botón y el LED RGB.
+4. **Motor derecho:** si gira al revés, revisa el intercambio de `BIN1`/`BIN2` descrito arriba.
+
+## Precauciones
+
+- No conectes al mismo tiempo el USB de la ESP32 y la salida del DC/DC (5 V) sin comprobar cómo protege la DevKitC-1 su entrada de 5 V.
+- Ajusta el LM2596 a 5 V **antes** de conectar las placas.
+- Nunca conectes 12 V a los cables del encoder (se alimentan a 3.3 V).
